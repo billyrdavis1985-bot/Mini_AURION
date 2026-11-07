@@ -104,6 +104,27 @@ class SpecialistTests(unittest.TestCase):
         self.assertEqual(msg.cost_nano, 400)
         self.assertEqual(self.ledger.spend("t1")["settled_nano"], 400)
 
+    def test_model_receives_registry_definitions(self):
+        seen = {}
+
+        class Capturing(FakeModel):
+            def complete(self, messages, tools):
+                seen["tools"] = tools
+                return super().complete(messages, tools)
+
+        registry = ToolRegistry()
+        registry.register("r", "READ", 0, FakeTools({"r": "v"}),
+                          description="reads files")
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="trusted", task_id="t1",
+                            agent_id="spec")
+        spec = Specialist("spec", Capturing([{"text": "done",
+                                              "evidence": []}]),
+                          tools, model_estimate_nano=0)
+        spec.investigate("t1", "brief")
+        self.assertEqual([t["name"] for t in seen["tools"]], ["r"])
+        self.assertEqual(seen["tools"][0]["description"], "reads files")
+
     def test_refused_model_call_escalates(self):
         tools = ToolWrapper(ToolRegistry(), receipts=self.receipts,
                             ledger=self.ledger, stage="trusted", task_id="t1",

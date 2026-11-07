@@ -34,6 +34,9 @@ PRICE_OUTPUT_ENV_VAR = "MINI_AURION_PRICE_OUTPUT_USD_PER_M"
 
 DEFAULT_BASE_URL = "https://api.meta.ai/v1"
 DEFAULT_MODEL = "muse-spark-1.1"
+# Prices carried over from ForgeVigil's reported launch figures for
+# muse-spark-1.1; UNVERIFIED against a real bill. Confirm on first invoice.
+# Override per run with MINI_AURION_PRICE_{INPUT,OUTPUT}_USD_PER_M.
 DEFAULT_INPUT_USD_PER_M = "1.25"
 DEFAULT_OUTPUT_USD_PER_M = "4.25"
 DEFAULT_MAX_OUTPUT_TOKENS = 4096
@@ -137,13 +140,15 @@ def _estimate_input_tokens(body_chars: int) -> int:
     return max(1, body_chars // 4)
 
 
-_API_ROLES = frozenset({"system", "user", "assistant", "tool"})
-
-
-def _api_role(role: str) -> str:
-    """Map internal roles (brief, tool_result, subtask ids) onto the API's
-    fixed set. Anything the API doesn't know becomes user text."""
-    return role if role in _API_ROLES else "user"
+def _api_message(message: dict) -> dict:
+    """Map every internal role to user text. Internal roles (brief,
+    tool_result, planner-chosen subtask ids) are untrusted labels, so they
+    ride inside the text where they cannot become instructions."""
+    role = str(message.get("role", "user"))
+    text = str(message.get("text", ""))[:8000]
+    if role != "user":
+        text = f"[{role}] {text}"
+    return {"role": "user", "content": text}
 
 
 class MuseModel:
@@ -172,11 +177,10 @@ class MuseModel:
         self.calls += 1
         body = {"model": self.config.model,
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}]
-                + [{"role": _api_role(str(m.get("role", "user"))),
-                    "content": str(m.get("text", ""))[:8000]} for m in messages],
+                + [_api_message(m) for m in messages],
                 "max_tokens": self.config.max_output_tokens,
                 "tool_choice": "auto"}
-        if tools and tools != ["*"]:
+        if tools:
             body["tools"] = [
                 {"type": "function",
                  "function": {"name": t.get("name", ""),

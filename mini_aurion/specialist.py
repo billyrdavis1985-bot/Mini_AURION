@@ -43,7 +43,8 @@ class Specialist:
                     return self._escalated(
                         task_id, brief, cost_nano,
                         f"spend cap refused model call: {exc}")
-            reply = self.model.complete(messages, tools=["*"])
+            reply = self.model.complete(
+                messages, tools=self.tools.registry.definitions())
             if reservation is not None:
                 actual = getattr(self.model, "last_cost_nano", 0) or 0
                 self.tools.ledger.settle(reservation, actual)

@@ -254,11 +254,16 @@ class AgentLoopFindings(_Tmp):
                            stage=stage, task_id="t", agent_id=agent)
 
     def orchestrator(self, plan, spec_script, synth=None, budget=10):
+        begun = self.rs.begin(agent_id="spec", task_id="t",
+                              action="tool_call", tool="read_file",
+                              detail={"args": {"path": "a.txt"}})
+        self.rs.settle(begun["seq"], 0)
         spec = Specialist("spec", FakeModel(spec_script), self.wrapper(),
                           model_estimate_nano=0)
         script = [plan] + ([synth] if synth else [])
         return Orchestrator("orc", FakeModel(script), {"spec": spec},
-                            Critic("critic", self.mem), receipts=self.rs,
+                            Critic("critic", self.mem, receipts=self.rs),
+                            receipts=self.rs,
                             ledger=self.led, message_budget=budget,
                             model_estimate_nano=0)
 
@@ -295,8 +300,8 @@ class AgentLoopFindings(_Tmp):
         msg = AgentMessage(sender="spec", task_id="t",
                            claim="the experiment replicated twice",
                            evidence=[{"kind": "receipt", "ref": 1}])
-        self.assertEqual(Critic("critic", self.mem).check(msg)["verdict"],
-                         "fail")
+        critic = Critic("critic", self.mem, receipts=self.rs)
+        self.assertEqual(critic.check(msg)["verdict"], "fail")
 
     def test_A4_a_denied_tool_escalates_instead_of_crashing_the_run(self):
         """ToolDenied is not caught: the run dies and no task_end is
@@ -326,11 +331,17 @@ class AgentLoopFindings(_Tmp):
         three = {"text": "p", "subtasks": [
             {"id": f"s{i}", "brief": "b", "specialist": "spec"}
             for i in range(3)]}
+        for task_id in ("t1", "t2"):
+            begun = self.rs.begin(agent_id="spec", task_id=task_id,
+                                  action="tool_call", tool="read_file",
+                                  detail={"args": {"path": "a.txt"}})
+            self.rs.settle(begun["seq"], 0)
         spec = Specialist("spec", FakeModel([ok] * 10), self.wrapper("trusted"),
                           model_estimate_nano=0)
         synth = {"text": "s", "evidence": [{"kind": "file", "ref": "a.txt"}]}
         orc = Orchestrator("orc", FakeModel([three, synth] * 2),
-                           {"spec": spec}, Critic("critic", self.mem),
+                           {"spec": spec},
+                           Critic("critic", self.mem, receipts=self.rs),
                            receipts=self.rs, ledger=self.led,
                            message_budget=4, model_estimate_nano=0)
         self.assertEqual(orc.run("t1", "q")["status"], "complete")

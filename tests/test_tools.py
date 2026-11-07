@@ -137,6 +137,15 @@ class ToolWrapperTests(unittest.TestCase):
         receipts = self.receipts.read_all()
         self.assertEqual(receipts[0]["action"], "denied")
 
+    def test_definitions_expose_registered_tools(self):
+        registry = ToolRegistry()
+        registry.register("r", "READ", 0, FakeTools({"r": "v"}),
+                          description="reads", parameters={"type": "object"})
+        self.assertEqual(registry.definitions(),
+                         [{"name": "r", "description": "reads",
+                           "parameters": {"type": "object"}}])
+        self.assertEqual(ToolRegistry().definitions(), [])
+
     def test_bad_tool_definition_is_refused(self):
         registry = ToolRegistry()
         with self.assertRaises(ToolDenied):

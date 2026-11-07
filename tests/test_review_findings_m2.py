@@ -139,12 +139,18 @@ class M2Findings(_Tmp):
             ToolWrapper(ToolRegistry(), receipts=self.rs, ledger=self.led,
                         stage="trusted", task_id="t", agent_id="spec"),
             model_estimate_nano=0)
+        for path in ("a.txt", "other.txt"):
+            begun = self.rs.begin(agent_id="spec", task_id="t",
+                                  action="tool_call", tool="read_file",
+                                  detail={"args": {"path": path}})
+            self.rs.settle(begun["seq"], 0)
         orc = Orchestrator(
             "orc",
             FakeModel([{"text": "plan"},
                        {"text": "The sky is blue AND the drug is safe.",
                         "evidence": [{"kind": "file", "ref": "other.txt"}]}]),
-            {"spec": spec}, Critic("critic", self.mem), receipts=self.rs,
+            {"spec": spec}, Critic("critic", self.mem, receipts=self.rs),
+            receipts=self.rs,
             ledger=self.led, model_estimate_nano=0)
         self.assertNotEqual(orc.run("t", "q")["status"], "complete")
 

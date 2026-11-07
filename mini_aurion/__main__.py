@@ -74,7 +74,12 @@ def live_check(corpus_dir: str, state_dir: str, cap_usd: str) -> int:
     try:
         reader = CorpusReader(corpus)
         registry = ToolRegistry()
-        registry.register("read_file", "READ", 0, reader)
+        registry.register(
+            "read_file", "READ", 0, reader,
+            description="Read a file from the corpus. Cite path:line.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"]})
         model = MuseModel(config)
         estimate = model.worst_case_nano([{"role": "brief", "text": QUESTION}])
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
@@ -83,7 +88,8 @@ def live_check(corpus_dir: str, state_dir: str, cap_usd: str) -> int:
         spec = Specialist("spec", model, tools,
                           model_estimate_nano=estimate)
         orc = Orchestrator("orc", model, {"spec": spec},
-                           Critic("critic", memory), receipts=receipts,
+                           Critic("critic", memory, receipts=receipts),
+                           receipts=receipts,
                            ledger=ledger, model_estimate_nano=estimate)
         result = orc.run("live-1", QUESTION)
         totals = ledger.totals()
@@ -94,6 +100,8 @@ def live_check(corpus_dir: str, state_dir: str, cap_usd: str) -> int:
         ledger.close()
         memory.close()
     print(f"status: {result['status']}")
+    print(f"model: {config.model} at {config.input_usd_per_m}/"
+          f"{config.output_usd_per_m} USD per M tokens (in/out)")
     print(f"text: {result['text'][:500]}")
     print(f"evidence: {result['evidence']}")
     print(f"spend settled: {totals['settled_nano']} nanoUSD "

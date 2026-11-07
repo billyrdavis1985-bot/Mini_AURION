@@ -55,8 +55,14 @@ class OrchestratorTests(unittest.TestCase):
                                 task_id="t1", agent_id=name)
             specialists[name] = Specialist(name, FakeModel(script), tools,
                                                  model_estimate_nano=0)
+        begun = self.receipts.begin(agent_id="spec", task_id="t1",
+                                        action="tool_call", tool="read_file",
+                                        detail={"args": {"path": "a.txt"}})
+        self.receipts.settle(begun["seq"], 0)
         orc = Orchestrator("orc", orc_model, specialists,
-                           Critic("critic", self.mem), receipts=self.receipts,
+                           Critic("critic", self.mem,
+                                  receipts=self.receipts),
+                           receipts=self.receipts,
                            ledger=self.ledger, message_budget=budget,
                            model_estimate_nano=0)
         return orc

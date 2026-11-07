@@ -40,12 +40,18 @@ class MemoryError(Exception):
 class Memory:
     def __init__(self, path: str | os.PathLike[str], *,
                  file_root: str | os.PathLike[str],
-                 receipt_store=None, fetched_urls: set[str] | None = None):
+                 receipt_store=None, fetched_urls: set[str] | None = None,
+                 mechanical_checks: frozenset = frozenset()):
         self.path = Path(path)
         self.root = Path(file_root).resolve()
         self.receipts = receipt_store
         self.fetched = fetched_urls if fetched_urls is not None else set()
-        self.mechanical_checks: set[str] = set()
+        for check_id in mechanical_checks:
+            if not check_id or not isinstance(check_id, str):
+                raise MemoryError("BAD_FIELD", "check id must be non-empty")
+            if check_id.startswith("mechanical:"):
+                raise MemoryError("BAD_FIELD", "check ids carry no prefix")
+        self.mechanical_checks = frozenset(mechanical_checks)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path))
         self.db.execute(
@@ -176,14 +182,6 @@ class Memory:
                 "verified_by": row[5], "reason": row[6],
                 "created_at": row[7], "expires_at": row[8],
                 "derived_from": json.loads(row[9]), "task_id": row[10]}
-
-    def register_mechanical(self, check_id: str) -> None:
-        """Register a mechanical check id. Only operator code calls this."""
-        if not check_id or not isinstance(check_id, str):
-            raise MemoryError("BAD_FIELD", "check id must be non-empty")
-        if check_id.startswith("mechanical:"):
-            raise MemoryError("BAD_FIELD", "check ids carry no prefix")
-        self.mechanical_checks.add(check_id)
 
     def verify(self, entry_id: str, verifier: str, *,
                mechanical: bool = False) -> dict:

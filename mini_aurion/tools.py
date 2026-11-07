@@ -39,13 +39,18 @@ class ToolFailed(Exception):
 
 
 class ToolRegistry:
-    """Server-side tool identities: class + worst-case cost per tool."""
+    """Server-side tool identities: class + worst-case cost per tool.
+
+    The registry also owns the tool definitions sent to the model. The
+    model never invents tools; it only sees what code registered.
+    """
 
     def __init__(self):
-        self._tools: dict[str, tuple[str, int, object]] = {}
+        self._tools: dict[str, dict] = {}
 
     def register(self, name: str, action_class: str, worst_case_nano: int,
-                 backend) -> None:
+                 backend, *, description: str = "",
+                 parameters: dict | None = None) -> None:
         if not name or not isinstance(name, str):
             raise ToolDenied("BAD_TOOL_DEF", "tool name must be non-empty")
         if action_class not in policy.CLASSES:
@@ -56,16 +61,27 @@ class ToolRegistry:
                              "worst_case_nano must be a non-negative int")
         if not hasattr(backend, "call"):
             raise ToolDenied("BAD_TOOL_DEF", "backend needs a call method")
+        if parameters is not None and not isinstance(parameters, dict):
+            raise ToolDenied("BAD_TOOL_DEF", "parameters must be an object")
         if name in self._tools:
             raise ToolDenied("BAD_TOOL_DEF", f"{name!r} is already registered")
-        self._tools[name] = (action_class, worst_case_nano, backend)
+        self._tools[name] = {"class": action_class,
+                             "estimate": worst_case_nano, "backend": backend,
+                             "description": description,
+                             "parameters": parameters or {"type": "object"}}
 
-    def get(self, name: str) -> tuple[str, int, object]:
+    def get(self, name: str) -> dict:
         try:
             return self._tools[name]
         except KeyError:
             raise ToolDenied("UNKNOWN_TOOL",
                              f"{name!r} is not registered") from None
+
+    def definitions(self) -> list[dict]:
+        """Tool specs for the model. Empty registry means no tools."""
+        return [{"name": name, "description": spec["description"],
+                 "parameters": spec["parameters"]}
+                for name, spec in self._tools.items()]
 
 
 class ToolWrapper:
@@ -81,7 +97,7 @@ class ToolWrapper:
     def call(self, name: str, args: dict, *, approved: bool = False,
              allowlisted: bool = False) -> dict:
         try:
-            action_class, estimate_nano, backend = self.registry.get(name)
+            spec = self.registry.get(name)
         except ToolDenied as exc:
             self.receipts.append(agent_id=self.agent_id, task_id=self.task_id,
                                  action="denied", tool=name,
@@ -89,6 +105,9 @@ class ToolWrapper:
                                          "reason": str(exc)},
                                  outcome="denied")
             raise
+        action_class = spec["class"]
+        estimate_nano = spec["estimate"]
+        backend = spec["backend"]
         verdict, reason = policy.decide(self.stage, action_class,
                                         approved=approved,
                                         allowlisted=allowlisted)

@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mini_aurion.critic import Critic  # noqa: E402
 from mini_aurion.ledger import Ledger  # noqa: E402
 from mini_aurion.memory import Memory  # noqa: E402
-from mini_aurion.muse import MuseConfig, MuseModel  # noqa: E402
+from mini_aurion.muse import MuseConfig, MuseError, MuseModel  # noqa: E402
 from mini_aurion.orchestrator import Orchestrator  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 from mini_aurion.specialist import Specialist  # noqa: E402
@@ -142,16 +142,19 @@ def grade(case: dict, result: dict, tree: Path) -> tuple[bool, list[str]]:
 
 
 def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
-             cap_nano: int) -> dict:
+             ledger: Ledger) -> dict:
     state_dir.mkdir(parents=True, exist_ok=True)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
-    ledger = Ledger(state_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
-                    daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
     memory = Memory(state_dir / "memory.sqlite3", file_root=tree,
                     receipt_store=receipts)
     try:
         registry = ToolRegistry()
-        registry.register("read_file", "READ", 0, TreeReader(tree))
+        registry.register(
+            "read_file", "READ", 0, TreeReader(tree),
+            description="Read a file from the repo tree. Cite path:line.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"]})
         model = MuseModel(MuseConfig.from_env())
         estimate = model.worst_case_nano([{"role": "brief", "text": question}])
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
@@ -160,13 +163,13 @@ def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
         spec = Specialist("spec", model, tools,
                           model_estimate_nano=estimate)
         orc = Orchestrator("orc", model, {"spec": spec},
-                           Critic("critic", memory), receipts=receipts,
+                           Critic("critic", memory, receipts=receipts),
+                           receipts=receipts,
                            ledger=ledger, model_estimate_nano=estimate)
         result = orc.run(task_id, question)
-        result["spent_nano"] = ledger.totals()["settled_nano"]
+        result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
         return result
     finally:
-        ledger.close()
         memory.close()
 
 
@@ -188,16 +191,27 @@ def main(argv=None) -> int:
     except Exception:
         print(f"refusing to run: bad cap {args.cap_usd!r}")
         return 2
+    try:
+        config = MuseConfig.from_env()
+    except MuseError as exc:
+        print(f"refusing to run: {exc}")
+        return 2
+    print(f"model: {config.model} at {config.input_usd_per_m}/"
+          f"{config.output_usd_per_m} USD per M tokens (in/out)")
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    eval_dir = out_path.parent / "code-qa-v1"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    ledger = Ledger(eval_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
+                    daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
     report: dict = {"set": "code-qa.v1", "runs": args.runs, "cases": {}}
     for case in cases:
         passes = 0
         details = []
         for n in range(args.runs):
             task_id = f"{case['id']}-r{n + 1}"
-            state = out_path.parent / "code-qa-v1" / task_id
-            result = run_live(case["question"], task_id, tree, state, cap_nano)
+            state = eval_dir / task_id
+            result = run_live(case["question"], task_id, tree, state, ledger)
             ok, reasons = grade(case, result, tree)
             passes += ok
             details.append({"run": n + 1, "pass": ok, "reasons": reasons,
@@ -208,10 +222,15 @@ def main(argv=None) -> int:
         report["cases"][case["id"]] = {"passed": passes, "runs": args.runs,
                                        "stable_4_of_5": passes >= 4,
                                        "details": details}
+    totals = ledger.totals()
+    ledger.close()
+    report["spent_nano"] = totals["settled_nano"]
     out_path.write_text(json.dumps(report, indent=1))
     print(f"wrote {out_path}")
     stable = sum(1 for c in report["cases"].values() if c["stable_4_of_5"])
     print(f"{stable}/{len(report['cases'])} cases stable at 4-of-5")
+    print(f"eval spend: {totals['settled_nano']} nanoUSD"
+          f" ({totals['settled_nano'] / NANO_PER_USD:.8f} USD)")
     return 0
 
 
