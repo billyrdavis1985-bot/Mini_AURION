@@ -69,7 +69,8 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(result["status"], "complete")
         self.assertEqual(result["text"], "A and B")
         self.assertEqual(result["evidence"], GOOD_EVIDENCE)
-        self.assertEqual(self.receipts.verify(), self.receipts.verify())
+        # verify() raises on any break and returns the receipt count.
+        self.assertEqual(self.receipts.verify(), len(self.receipts.read_all()))
         actions = [r["action"] for r in self.receipts.read_all()]
         self.assertIn("task_start", actions)
         self.assertIn("task_end", actions)
