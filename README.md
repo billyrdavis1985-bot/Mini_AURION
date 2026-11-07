@@ -8,8 +8,8 @@ Network): an orchestrated multi-LLM system for real-world problems. This repo
 is the lighter build-and-test version. If it works, it helps build the full
 system.
 
-**Status: Milestone 3** — live Muse adapter proven against a fake API
-(11 tests), `live-check` CLI ready for the operator's keyed run.
+**Status: Milestone 3** — live adapter + frozen Code-QA eval set
+(code-qa.v1, 5 cases, script-graded). Operator's keyed runs pending.
 
 ## Rules
 
@@ -44,6 +44,7 @@ No API key, no network, no spend. All Milestone 0 tests run on fixtures.
 | `mini_aurion/orchestrator.py` | hub-spoke runner: delegate, verify, retry, synthesize |
 | `mini_aurion/muse.py` | live Muse adapter: metered, fail-closed, pinned prompt |
 | `mini_aurion/fixture.py` | scripted fake model + tools for $0 tests |
+| `eval/` | frozen Code-QA set + script grader (live runs on operator PC) |
 | `tests/` | suite over disposable state |
 | `OPERATIONS.md` | operating constitution |
 

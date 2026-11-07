@@ -1,0 +1,68 @@
+{
+    "cases": [
+        {
+            "expect": {
+                "function": "ToolRegistry.get",
+                "line_contains": "def get(",
+                "must_mention": [
+                    "UNKNOWN_TOOL",
+                    "denied"
+                ],
+                "path": "mini_aurion/tools.py"
+            },
+            "id": "qa-unknown-tool",
+            "question": "Which function refuses unregistered tools, and what receipt does the caller write for the refusal? Cite path:line.",
+            "type": "code"
+        },
+        {
+            "expect": {
+                "function": "Ledger.reserve",
+                "line_contains": "def reserve(",
+                "must_mention": [
+                    "BEGIN IMMEDIATE"
+                ],
+                "path": "mini_aurion/ledger.py"
+            },
+            "id": "qa-race-lock",
+            "question": "Which function serializes concurrent spend reservations so caps cannot race? Cite path:line.",
+            "type": "code"
+        },
+        {
+            "expect": {
+                "function": "ReceiptStore.settle",
+                "line_contains": "def settle(",
+                "must_mention": [
+                    "return_code"
+                ],
+                "path": "mini_aurion/receipts.py"
+            },
+            "id": "qa-settle-source",
+            "question": "Settlement outcomes come from the agent's report or the action's return code? Name the enforcing function. Cite path:line.",
+            "type": "code"
+        },
+        {
+            "expect": {
+                "bullets": 6,
+                "path": "OPERATIONS.md",
+                "span": [
+                    108,
+                    124
+                ]
+            },
+            "id": "qa-tier-summary",
+            "question": "Summarize OPERATIONS.md section 8 (Tier rules) as one bullet per rule. Every bullet must cite its line range as OPERATIONS.md:<line>.",
+            "type": "summary"
+        },
+        {
+            "expect": {
+                "escalated": true
+            },
+            "id": "qa-newsletter",
+            "question": "Which function sends the release announcement newsletter? Cite path:line.",
+            "type": "unanswerable"
+        }
+    ],
+    "frozen_commit": "c55a62132fc08073e92e5457fb9343729656e9ca",
+    "note": "Frozen answers are exact at frozen_commit. Code cases grade the exact function name plus a path:line cite whose line contains the name. Eval tree must be a checkout of frozen_commit.",
+    "set": "code-qa.v1"
+}

@@ -75,7 +75,10 @@ class Memory:
         if kind == "file":
             if not isinstance(ref, str) or not ref:
                 return "file ref must be a non-empty string"
-            candidate = (self.root / ref).resolve()
+            path_part, _, line_part = ref.partition(":")
+            if line_part and not line_part.isdigit():
+                return f"bad line anchor: {ref!r}"
+            candidate = (self.root / (path_part or ref)).resolve()
             try:
                 candidate.relative_to(self.root)
             except ValueError:

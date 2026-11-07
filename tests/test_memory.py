@@ -39,6 +39,16 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(entry["status"], "unverified")
         self.assertIn("not found", entry["reason"])
 
+    def test_line_anchored_ref_resolves(self):
+        entry = self.mem.write("spec", "claim",
+                               [{"kind": "file", "ref": "paper.txt:1"}])
+        self.assertEqual(entry["reason"], "")
+
+    def test_bad_line_anchor_is_caught(self):
+        entry = self.mem.write("spec", "claim",
+                               [{"kind": "file", "ref": "paper.txt:x"}])
+        self.assertIn("bad line anchor", entry["reason"])
+
     def test_path_escape_is_caught(self):
         entry = self.mem.write("spec", "claim",
                                [{"kind": "file", "ref": "../m.sqlite3"}])
