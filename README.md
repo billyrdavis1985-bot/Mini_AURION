@@ -35,6 +35,7 @@ No API key, no network, no spend. All Milestone 0 tests run on fixtures.
 | `mini_aurion/receipts.py` | hash-chained append-only action receipts |
 | `mini_aurion/ledger.py` | spend reservations, caps, settlement |
 | `mini_aurion/policy.py` | deterministic action gate (reads free, writes gated) |
+| `mini_aurion/memory.py` | provenance-tracked notes, write-time evidence checks |
 | `mini_aurion/fixture.py` | scripted fake model + tools for $0 tests |
 | `tests/` | suite over disposable state |
 | `OPERATIONS.md` | operating constitution |

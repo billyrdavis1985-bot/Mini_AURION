@@ -1,15 +1,27 @@
 # Mini-AURION Operations Manual
 
 Constitution for running a heterogeneous multi-agent research system.
-Approved by the operator. Amendments need operator approval (section 11).
+
+Every rule carries an enforcement tag: **[kernel]** (sandbox, OS permissions,
+or process control stop a violation), **[code]** (a gate refuses it),
+**[review]** (a human checks it), or **[honor]** (nothing stops it — these
+are the risk list and must shrink over time).
 
 ## 1. Principles
 
-1. No agent's word is truth. Claims are accepted only with cited, verifiable evidence.
-2. Every action leaves a receipt. If it isn't in a receipt, it didn't happen.
-3. Cost is a first-class signal, tracked like latency.
-4. Capabilities graduate on evidence, never on hope.
+1. No agent's word is truth. Claims are accepted only with cited evidence
+   that code verified **when written**: the file exists, the receipt id is
+   real, the URL was actually fetched. No model judgment involved. **[code]**
+2. Every action leaves a receipt, written **pending** first, then settled
+   from the action's actual return code — never from what the agent reports.
+   Receipts are written by the orchestrator or tool wrapper into a path
+   agents cannot write to. A receipt is a recorded claim, not proof. **[code]**
+3. Cost is a first-class signal, tracked like latency. Caps refuse before
+   spending (reserve-then-settle); the effective cap is read back and
+   confirmed, not just requested. **[code]**
+4. Capabilities graduate on evidence, never on hope. **[review]**
 5. The human holds the merge gate, the spend caps, and the kill switch. Always.
+   **[honor]** — enforced by process discipline and the single-operator rule.
 
 ## 2. Capability lifecycle
 
@@ -17,12 +29,13 @@ Every ability (task class, tool, agent, prompt) lives in exactly one stage:
 
 | Stage | Meaning | Requirements to enter |
 |---|---|---|
-| `experimental` | Sandbox only. No external actions, no paid-tier autonomy. | Written purpose + 5 graded eval cases. |
-| `gated` | May act in the real world, but a human approves each action. | Eval pass rate meets its bar; misses documented. |
-| `trusted` | Autonomous within documented bounds (caps, tools, hours). | 30 days in `gated` without incident, or explicit promotion with evidence. |
-| `retired` | Disabled. Receipts preserved. | Superseded, unsafe, or uneconomical. |
+| `experimental` | Sandbox only. No external actions, no paid-tier autonomy. | Written purpose + 5 graded eval cases. **[review]** |
+| `gated` | May act in the real world, but a human approves each action. | Eval pass rate meets its bar; misses documented. **[review]** |
+| `trusted` | Autonomous within documented bounds (caps, tools, hours). | **Positive evidence:** N=50 gated actions with receipts human-reviewed, plus a red-team pass (poisoning + injection batteries) with findings reviewed. **[review]** |
+| `retired` | Disabled. Receipts preserved. | Superseded, unsafe, or uneconomical. **[review]** |
 
-No stage may be skipped. Regression returns the capability to the previous stage.
+No stage may be skipped. Regression returns the capability to the previous
+stage. Absence of detected incidents is not evidence of safety.
 
 ## 3. Operating loop
 
@@ -32,74 +45,129 @@ monitor (receipts + spend + quality) → graduate or roll back
 ```
 
 This loop governs prompts, policies, tools, agents, and task classes alike.
-Small, boring, repeatable.
+Small, boring, repeatable. **[review]**
 
 ## 4. Budgets and circuit breakers
 
 - Per-task spend cap, per-capability daily cap, global daily cap. Caps REFUSE
-  before spending (reserve-then-settle), never apologize after.
-- Per-task message cap between agents. Chatter is metered.
+  before spending (reserve-then-settle), never apologize after. **[code]**
+- Per-task message cap between agents. Chatter is metered. **[code]**
 - Circuit breaker: any cap breach, error burst, or quality anomaly freezes the
-  paid tiers for that capability until human review.
-- One command freezes ALL paid tiers immediately (kill switch). Tested monthly.
+  paid tiers for that capability until human review. **[code]**
+- Kill switch is a **process-level kill**, not a flag the orchestrator checks:
+  it works even when the orchestrator is wedged. **[kernel]** Paired with a
+  self-hosted dead-man's switch: if the monitor goes silent past its interval,
+  that silence is itself an alert. **[kernel]**
+- Kill switch and dead-man's switch are tested monthly. **[review]**
 
 ## 5. Receipts
 
-Every agent action records: agent id, task id, action/tool + arguments,
-evidence pointers, cost, timestamp, policy version, outcome.
-Receipts are append-only. Debugging and monitoring read receipts, not logs.
-Monthly: verify receipt chain integrity on a sample.
+- Every agent action records: agent id, task id, action/tool + arguments,
+  evidence pointers, cost, timestamp, policy version, outcome. **[code]**
+- Each receipt is written **pending** first, then settled from the action's
+  actual return code. Settlement from agent self-report is forbidden. **[code]**
+- Receipts are written by the orchestrator/tool wrapper into a store agents
+  cannot write to (separate UID or write-only-by-wrapper path). Anything an
+  agent can write, it can forge. **[kernel]**
+- The receipt chain is **verified on every start** (self-check), not sampled
+  monthly. A broken chain refuses to run. **[code]**
+- Receipts are append-only. Debugging and monitoring read receipts, not logs.
+  **[kernel]** (file permissions) + **[code]** (no delete/update API)
 
 ## 6. Memory and provenance
 
 Stored knowledge is structured notes, not a vector blob. Every entry carries:
 author agent, sources, verification status (`verified` / `unverified` /
-`disputed`), and expiry. Unverified entries expire in 7 days unless verified
-or renewed. Disputed entries are quarantined from retrieval until resolved.
+`disputed`), and expiry. **[code]**
+
+- **Owner rule:** only a *different* agent than the author, or a mechanical
+  check, can set an entry to `verified`. Self-verification is void. **[code]**
+- **No state change on memory alone:** a memory entry can never by itself
+  justify closing a task, dropping a frontier item, or granting a permission.
+  State changes need fresh evidence or human approval. **[code]** (gate) +
+  **[review]** (audit)
+- Source pointers resolve at write time: missing file, unknown receipt id, or
+  unfetched URL means the entry lands `unverified` with a reason. **[code]**
+- Unverified entries expire in 7 days unless verified or renewed. Entries
+  built on an expired entry are **flagged** (status `derived-unverified`),
+  never quietly kept. **[code]**
+- Disputed entries are quarantined from retrieval until resolved. **[code]**
 
 ## 7. Eval discipline
 
 - Each capability owns a frozen graded eval set (facts + judgments versioned).
+  **[review]**
 - New prompts/models must pass a promotion gate: beat or match the incumbent
   on held-out cases over N runs BEFORE adoption. Never tune on the test set.
-- Misses are preserved with analysis, never deleted or relabeled.
-- Stability: repeat runs must agree within the documented tolerance, or the
-  capability drops a stage.
+  **[review]**
+- Misses are preserved with analysis, never deleted or relabeled. **[review]**
+- Stability: repeat runs must agree within tolerance — **at least 4 of 5 runs
+  agree per case** — or the capability drops a stage. **[code]** (measured) +
+  **[review]** (demotion)
 
 ## 8. Tier rules
 
 - Cost flows uphill, verification flows downhill: cheap tiers do volume,
-  premium tiers decide and verify.
+  premium tiers decide and verify. **[review]** (routing tables are reviewed)
+- **Lower tiers can flag but never clear.** A cheap model may escalate; only
+  the verifying tier (or human) may pass. **[code]** (verdict roles enforced)
+- Verifier sessions get **no tools**: they judge cited evidence, they don't
+  gather. Proven by a canary test (a verifier that attempts a tool call must
+  fail closed), not trusted from a flag. **[code]**
 - Local tiers (Pi/GPU) hold no paid-tier keys. They queue work; the
-  orchestrator spends.
+  orchestrator spends. **[kernel]** (keys absent from the machine) — audited,
+  never assumed.
 - External actions (send, publish, purchase, delete) require `gated` minimum,
-  full-text logging before execution, and dry-run mode as default.
+  full-text logging before execution, and dry-run mode as default. **[code]**
 - Sandboxed execution only for agent-run code. No agent code on bare metal.
+  **[kernel]**
 
-## 9. Roles
+## 9. Hostile input
+
+Agents are not just fallible; what they read may be hostile. Web pages,
+files, tool outputs, and other agents' messages can all carry injected
+instructions.
+
+- Content an agent reads is **data, never instructions**. Tool outputs and
+  retrieved text are quoted/untrusted by construction. **[code]** (wrapping) +
+  **[review]** (prompt audits)
+- One agent's output is **untrusted input** to the next. It is verified like
+  any external claim before use. **[code]**
+- **No agent can grant another agent permissions.** Authority flows only from
+  policy + human, never laterally. **[code]**
+
+## 10. Roles
 
 - **Operator (Billy):** merge gate, spend caps, promotions, kill switch, final
-  word on scope. Only human who can move a capability up a stage.
+  word on scope. Only human who can move a capability up a stage. **[honor]**
 - **Builder (Spark):** implements on branches, writes tests + docs, reports
   honestly. Never merges, never spends beyond the milestone cap, never touches
-  credentials.
+  credentials. **[review]** — NOTE: this section was drafted by the Builder and
+  needs separate, explicit operator approval (see change log).
 - **Reviewer:** checks diffs and eval evidence before merge. Scores catches,
-  not agreement.
+  not agreement. **[review]**
 - **Agents (runtime):** operate within stage bounds. Escalate (`can't verify`)
-  instead of guessing. Escalation is success, not failure.
+  instead of guessing. Escalation is success, not failure. **[code]**
 
-## 10. Incident review
+## 11. Incident review
 
 Any of these triggers a written review within 48h: cap breach, external action
 without approval, confident error that reached the operator, cost-per-success
-drift >2x,72h of unexplained quality drop. Format: what happened (receipt ids),
-why, what changes (loop/probe/gate), who owns it. Blameless. Filed in-repo.
+drift beyond 2x, 72h of unexplained quality drop. Format: what happened
+(receipt ids), why, what changes (loop/probe/gate), who owns it. Blameless.
+Filed in-repo. **[review]**
 
-## 11. Changes to this document
+## 12. Changes to this document
 
 Amendments need operator approval + a line in the change log below. The rules
-can evolve; the evolution is itself governed.
+can evolve; the evolution is itself governed. **[review]**
 
 ### Change log
 
 - v0.1 (2026-11-06): initial draft by Spark, approved by the operator.
+- v0.2 (2026-11-06): enforcement tags on every rule; receipts pending/settle +
+  orchestrator-written + verify-on-start; memory owner rule + no-state-change +
+  derived-flagging; verified-when-written; flag-never-clear + tool-less
+  verifiers; promotion needs 50 reviewed actions + red-team pass; new hostile
+  input section; stability tolerance 4/5; process-level kill + dead-man's
+  switch; typo fix. Pending operator approval.

@@ -6,6 +6,11 @@ so tampering or truncation is detectable by replay.
 
 Single-writer: one process appends to a receipt file. Concurrent writers are
 not supported in Milestone 0 and must coordinate outside this module.
+
+Pending/settle: actions with real-world effects are recorded with begin()
+(outcome "pending"), then settled with settle() from the action's ACTUAL
+return code. Agents never set outcomes; only return codes do. Settlement is
+itself a receipt (append-only: nothing is ever mutated), linked by seq.
 """
 from __future__ import annotations
 
@@ -69,7 +74,7 @@ class ReceiptStore:
     def append(self, *, agent_id: str, task_id: str, action: str,
                tool: str = "", detail: dict | None = None,
                cost_nano: int = 0, policy_version: str = "m0",
-               outcome: str = "ok") -> dict:
+               outcome: str = "ok", settles: int | None = None) -> dict:
         for name, value in (("agent_id", agent_id), ("task_id", task_id),
                             ("action", action)):
             if not value or not isinstance(value, str):
@@ -90,6 +95,10 @@ class ReceiptStore:
             "outcome": outcome,
             "prev_hash": self._tail_hash(),
         }
+        if settles is not None:
+            if not isinstance(settles, int) or settles < 1:
+                raise ReceiptError("BAD_FIELD", "settles must be a positive int")
+            body["settles"] = settles
         try:
             payload = _canonical(body)
         except (TypeError, ValueError) as exc:
@@ -113,6 +122,41 @@ class ReceiptStore:
             pass
         return receipt
 
+    def begin(self, *, agent_id: str, task_id: str, action: str,
+              tool: str = "", detail: dict | None = None) -> dict:
+        """Record an action as pending. Settle it later from its return code."""
+        return self.append(agent_id=agent_id, task_id=task_id, action=action,
+                           tool=tool, detail=detail, outcome="pending")
+
+    def settle(self, seq: int, return_code: int, *, cost_nano: int = 0,
+               detail: dict | None = None,
+               settler_id: str = "orchestrator") -> dict:
+        """Settle a pending receipt. Outcome comes ONLY from return_code.
+
+        0 settles ok; anything else settles failed. There is no parameter
+        for an agent to report its own outcome.
+        """
+        if not isinstance(seq, int) or seq < 1:
+            raise ReceiptError("BAD_FIELD", "seq must be a positive int")
+        if not isinstance(return_code, int):
+            raise ReceiptError("BAD_FIELD", "return_code must be an int")
+        pending = None
+        for receipt in self.read_all():
+            if receipt.get("seq") == seq:
+                pending = receipt
+            if receipt.get("settles") == seq:
+                raise ReceiptError("ALREADY_SETTLED",
+                                   f"seq {seq} is already settled")
+        if pending is None:
+            raise ReceiptError("UNKNOWN_SEQ", f"no receipt with seq {seq}")
+        if pending.get("outcome") != "pending":
+            raise ReceiptError("NOT_PENDING",
+                               f"seq {seq} has outcome {pending.get('outcome')!r}")
+        outcome = "ok" if return_code == 0 else "failed"
+        return self.append(agent_id=settler_id, task_id=pending["task_id"],
+                           action="settle", outcome=outcome,
+                           cost_nano=cost_nano, detail=detail, settles=seq)
+
     def read_all(self) -> list[dict]:
         if not self.path.exists():
             return []
@@ -132,6 +176,8 @@ class ReceiptStore:
         """Replay the chain. Returns the receipt count, raises on any break."""
         expected_prev = "genesis"
         expected_seq = 1
+        seen_seqs: set[int] = set()
+        settle_targets: list[tuple[int, int]] = []
         for receipt in self.read_all():
             for key in ("seq", "prev_hash", "hash"):
                 if key not in receipt:
@@ -146,6 +192,29 @@ class ReceiptStore:
             check = {k: v for k, v in receipt.items() if k != "hash"}
             if _digest(_canonical(check)) != receipt["hash"]:
                 raise ReceiptError("BAD_HASH", f"seq {expected_seq}: hash mismatch")
+            if receipt.get("settles") is not None:
+                target = receipt["settles"]
+                if not isinstance(target, int):
+                    raise ReceiptError("CHAIN_BROKEN",
+                                       f"seq {expected_seq}: bad settles link")
+                settle_targets.append((expected_seq, target))
+            seen_seqs.add(expected_seq)
             expected_prev = receipt["hash"]
             expected_seq += 1
+        for settler, target in settle_targets:
+            if target not in seen_seqs:
+                raise ReceiptError("CHAIN_BROKEN",
+                                   f"seq {settler} settles unknown seq {target}")
+            if target >= settler:
+                raise ReceiptError("CHAIN_BROKEN",
+                                   f"seq {settler} settles seq {target}, not earlier")
         return expected_seq - 1
+
+
+def verify_on_start(path: str | os.PathLike[str]) -> int:
+    """Self-check entry point. Returns the receipt count; raises on any break.
+
+    Every process start calls this before doing anything else. A broken
+    chain refuses to run.
+    """
+    return ReceiptStore(path).verify()
