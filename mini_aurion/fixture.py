@@ -29,7 +29,10 @@ class FakeModel:
         if self.script:
             reply = self.script.pop(0)
             return {"text": reply.get("text", ""),
-                    "tool_calls": list(reply.get("tool_calls", []))}
+                    "tool_calls": list(reply.get("tool_calls", [])),
+                    "evidence": list(reply.get("evidence", [])),
+                    "confidence": reply.get("confidence", 0.0),
+                    "subtasks": list(reply.get("subtasks", []))}
         return {"text": ESCALATE_TEXT, "tool_calls": []}
 
     def total_cost_nano(self) -> int:
