@@ -84,12 +84,17 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(verified["verified_by"], "critic")
 
     def test_mechanical_check_can_verify(self):
-        self.mem.register_mechanical("citation-resolve")
-        entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
-        verified = self.mem.verify(entry["id"], "citation-resolve",
-                                   mechanical=True)
-        self.assertEqual(verified["status"], "verified")
+        mem = Memory(os.path.join(self.tmp.name, "m2.sqlite3"),
+                     file_root=self.root, receipt_store=self.receipts,
+                     mechanical_checks=frozenset({"citation-resolve"}))
+        try:
+            entry = mem.write("spec", "claim",
+                              [{"kind": "file", "ref": "paper.txt"}])
+            verified = mem.verify(entry["id"], "citation-resolve",
+                                  mechanical=True)
+            self.assertEqual(verified["status"], "verified")
+        finally:
+            mem.close()
 
     def test_unregistered_mechanical_check_is_refused(self):
         entry = self.mem.write("spec", "claim",
