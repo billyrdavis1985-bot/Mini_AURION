@@ -103,6 +103,18 @@ class MuseTests(unittest.TestCase):
                          [{"kind": "file", "ref": "a.txt"}])
         self.assertEqual(reply["confidence"], 0.7)
 
+    def test_internal_roles_map_to_api_roles(self):
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(self.config).complete(
+            [{"role": "brief", "text": "b"},
+             {"role": "tool_result", "text": "r"},
+             {"role": "s1", "text": "s"},
+             {"role": "assistant", "text": "a"}], [])
+        roles = [m["role"]
+                 for m in ScriptedHandler.requests[0]["body"]["messages"]]
+        self.assertEqual(roles, ["system", "user", "user", "user",
+                                 "assistant"])
+
     def test_cannot_verify_passes_through(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
         reply = MuseModel(self.config).complete([], [])
