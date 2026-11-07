@@ -1,9 +1,8 @@
 """Reviewer findings from a full-repo pass at d1b489c, kept as
-expected-failure tests.
+regression tests.
 
-Each test fails today. When its fix lands, unittest reports "unexpected
-success" and CI fails until that test's marker is deleted; the test then
-stays as a regression guard, per the review-findings contract.
+All findings are fixed; markers were deleted with each fix, per the
+review-findings contract.
 
 H1 and H2 bear on the code-qa.v1 decision (>=4/5 per case): both can
 change a case's score for reasons that are not the model's.
