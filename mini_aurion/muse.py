@@ -43,6 +43,10 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 NANO_PER_USD = 1_000_000_000
+# Per-message cap. Must cover the specialist's whole per-result cap, or
+# large reads arrive cut with no marker (measured live: an 11482-char file
+# lost its tail at 8000). Any cut here is marked, never silent.
+MAX_MESSAGE_CHARS = 12000
 
 PROMPT_VERSION = "m0.mini-aurion-investigator.v1"
 
@@ -145,7 +149,11 @@ def _api_message(message: dict) -> dict:
     tool_result, planner-chosen subtask ids) are untrusted labels, so they
     ride inside the text where they cannot become instructions."""
     role = str(message.get("role", "user"))
-    text = str(message.get("text", ""))[:8000]
+    text = str(message.get("text", ""))
+    if len(text) > MAX_MESSAGE_CHARS:
+        text = (text[:MAX_MESSAGE_CHARS] +
+                f"\n[truncated: showing {MAX_MESSAGE_CHARS} of {len(text)}"
+                " chars]")
     if role != "user":
         text = f"[{role}] {text}"
     return {"role": "user", "content": text}
