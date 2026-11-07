@@ -121,7 +121,9 @@ class Orchestrator:
             else:
                 synth_note = (f"synthesis failed critic:"
                               f" {check['catches']}")[:300]
-        fallback = "PARTIAL: " + "; ".join(
+        # The marker rides on its own line: glued onto the first claim line
+        # it eats a leading bullet ("PARTIAL: - ..." is not a bullet).
+        fallback = "PARTIAL:\n" + "; ".join(
             f["message"].claim for f in accepted)[:2000]
         evidence = []
         for finding in accepted:

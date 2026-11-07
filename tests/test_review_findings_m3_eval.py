@@ -127,7 +127,6 @@ class FailuresScoreAsEscalations(_Harness):
 
 class PartialPrefixEatsTheFirstBullet(_Harness):
 
-    @unittest.expectedFailure
     def test_H2_summary_survives_the_synthesis_fallback(self):
         """When synthesis is refused or fails the critic, the orchestrator
         returns 'PARTIAL: ' + the accepted claims. If the specialist's claim
