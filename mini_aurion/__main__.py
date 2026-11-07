@@ -30,14 +30,24 @@ class CorpusReader:
         self.root = root.resolve()
 
     def call(self, name: str, args: dict):
+        if name == "list_dir":
+            target = self._confine(str(args.get("path", ".")))
+            if not target.is_dir():
+                raise NotADirectoryError("not a directory")
+            return "\n".join(sorted(p.name + ("/" if p.is_dir() else "")
+                                    for p in target.iterdir()))
         if name != "read_file":
             raise KeyError(f"unknown tool {name!r}")
-        target = (self.root / str(args.get("path", ""))).resolve()
+        return self._confine(str(args.get("path", ""))).read_text(
+            encoding="utf-8")
+
+    def _confine(self, path: str):
+        target = (self.root / path).resolve()
         try:
             target.relative_to(self.root)
         except ValueError:
             raise PermissionError("path escapes the corpus") from None
-        return target.read_text(encoding="utf-8")
+        return target
 
 
 def live_check(corpus_dir: str, state_dir: str, cap_usd: str) -> int:
@@ -80,6 +90,11 @@ def live_check(corpus_dir: str, state_dir: str, cap_usd: str) -> int:
             parameters={"type": "object",
                         "properties": {"path": {"type": "string"}},
                         "required": ["path"]})
+        registry.register(
+            "list_dir", "READ", 0, reader,
+            description="List a directory in the corpus.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}}})
         model = MuseModel(config)
         estimate = model.worst_case_nano([{"role": "brief", "text": QUESTION}])
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,

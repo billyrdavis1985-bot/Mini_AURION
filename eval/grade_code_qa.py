@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -45,14 +46,30 @@ class TreeReader:
         self.root = root.resolve()
 
     def call(self, name: str, args: dict):
+        if name == "list_dir":
+            return self._list(str(args.get("path", ".")))
         if name != "read_file":
             raise KeyError(f"unknown tool {name!r}")
-        target = (self.root / str(args.get("path", ""))).resolve()
+        return self._read(str(args.get("path", "")))
+
+    def _confine(self, path: str):
+        target = (self.root / path).resolve()
         try:
             target.relative_to(self.root)
         except ValueError:
             raise PermissionError("path escapes the tree") from None
-        return target.read_text(encoding="utf-8")
+        return target
+
+    def _read(self, path: str) -> str:
+        return self._confine(path).read_text(encoding="utf-8")
+
+    def _list(self, path: str) -> str:
+        target = self._confine(path)
+        if not target.is_dir():
+            raise NotADirectoryError(f"not a directory: {path!r}")
+        entries = sorted(p.name + ("/" if p.is_dir() else "")
+                         for p in target.iterdir())
+        return "\n".join(entries)
 
 
 def line_contains(tree: Path, path: str, lineno: int, text: str) -> bool:
@@ -143,18 +160,27 @@ def grade(case: dict, result: dict, tree: Path) -> tuple[bool, list[str]]:
 
 def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger) -> dict:
+    if state_dir.exists():
+        shutil.rmtree(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
     memory = Memory(state_dir / "memory.sqlite3", file_root=tree,
                     receipt_store=receipts)
     try:
         registry = ToolRegistry()
+        reader = TreeReader(tree)
         registry.register(
-            "read_file", "READ", 0, TreeReader(tree),
+            "read_file", "READ", 0, reader,
             description="Read a file from the repo tree. Cite path:line.",
             parameters={"type": "object",
                         "properties": {"path": {"type": "string"}},
                         "required": ["path"]})
+        registry.register(
+            "list_dir", "READ", 0, reader,
+            description="List a directory in the repo tree. Start here"
+                        " to discover the layout.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}}})
         model = MuseModel(MuseConfig.from_env())
         estimate = model.worst_case_nano([{"role": "brief", "text": question}])
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
