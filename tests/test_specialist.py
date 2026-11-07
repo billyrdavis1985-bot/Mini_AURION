@@ -33,7 +33,9 @@ class SpecialistTests(unittest.TestCase):
                             ledger=self.ledger, stage="trusted", task_id="t1",
                             agent_id="spec")
         brief = kw.pop("brief", "brief")
-        spec = Specialist("spec", FakeModel(script), tools, **kw)
+        estimate = kw.pop("model_estimate_nano", 0)
+        spec = Specialist("spec", FakeModel(script), tools,
+                          model_estimate_nano=estimate, **kw)
         return spec.investigate("t1", brief)
 
     def test_tool_loop_builds_evidenced_message(self):
@@ -83,7 +85,8 @@ class SpecialistTests(unittest.TestCase):
                             ledger=self.ledger, stage="gated", task_id="t1",
                             agent_id="spec")
         spec = Specialist("spec", FakeModel(
-            [{"text": "", "tool_calls": [{"tool": "w", "args": {}}]}]), tools)
+            [{"text": "", "tool_calls": [{"tool": "w", "args": {}}]}]), tools,
+            model_estimate_nano=0)
         msg = spec.investigate("t1", "brief")
         self.assertTrue(msg.escalated)
         self.assertIn("needs approval", msg.claim)

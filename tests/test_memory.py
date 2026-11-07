@@ -74,11 +74,19 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(verified["verified_by"], "critic")
 
     def test_mechanical_check_can_verify(self):
+        self.mem.register_mechanical("citation-resolve")
         entry = self.mem.write("spec", "claim",
                                [{"kind": "file", "ref": "paper.txt"}])
         verified = self.mem.verify(entry["id"], "citation-resolve",
                                    mechanical=True)
         self.assertEqual(verified["status"], "verified")
+
+    def test_unregistered_mechanical_check_is_refused(self):
+        entry = self.mem.write("spec", "claim",
+                               [{"kind": "file", "ref": "paper.txt"}])
+        with self.assertRaises(MemoryError) as ctx:
+            self.mem.verify(entry["id"], "citation-resolve", mechanical=True)
+        self.assertEqual(ctx.exception.code, "UNREGISTERED_CHECK")
 
     def test_mechanical_prefix_without_flag_is_refused(self):
         entry = self.mem.write("spec", "claim",

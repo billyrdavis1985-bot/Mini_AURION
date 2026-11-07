@@ -130,7 +130,11 @@ class ToolWrapper:
             result = None
             return_code = 1
             error = str(exc)
-        actual = getattr(backend, "last_cost_nano", 0) or 0
+        reported = getattr(backend, "last_cost_nano", None)
+        if reported is None:
+            actual = estimate_nano
+        else:
+            actual = reported or 0
         if reservation is not None:
             self.ledger.settle(reservation, actual)
         self.receipts.settle(begun["seq"], return_code, cost_nano=actual)

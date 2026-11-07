@@ -246,12 +246,16 @@ class ReceiptStore:
             raise ReceiptError("CHAIN_BROKEN",
                                "a pending action settles exactly once")
         anchor = self._read_anchor()
-        if anchor is not None:
-            count = expected_seq - 1
-            if count != anchor["max_seq"] or expected_prev != anchor["hash"]:
-                raise ReceiptError("CHAIN_BROKEN",
-                                   "tail does not match the head anchor:"
-                                   " the store was truncated or replaced")
+        count = expected_seq - 1
+        if anchor is None:
+            if count > 0:
+                raise ReceiptError("ANCHOR_MISSING",
+                                   "receipts present but the head anchor is"
+                                   " gone: absence proves nothing")
+        elif count != anchor["max_seq"] or expected_prev != anchor["hash"]:
+            raise ReceiptError("CHAIN_BROKEN",
+                               "tail does not match the head anchor:"
+                               " the store was truncated or replaced")
         return expected_seq - 1
 
 

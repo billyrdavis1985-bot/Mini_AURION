@@ -53,10 +53,12 @@ class OrchestratorTests(unittest.TestCase):
             tools = ToolWrapper(ToolRegistry(), receipts=self.receipts,
                                 ledger=self.ledger, stage="trusted",
                                 task_id="t1", agent_id=name)
-            specialists[name] = Specialist(name, FakeModel(script), tools)
+            specialists[name] = Specialist(name, FakeModel(script), tools,
+                                                 model_estimate_nano=0)
         orc = Orchestrator("orc", orc_model, specialists,
                            Critic("critic", self.mem), receipts=self.receipts,
-                           ledger=self.ledger, message_budget=budget)
+                           ledger=self.ledger, message_budget=budget,
+                           model_estimate_nano=0)
         return orc
 
     def test_happy_path_completes_with_combined_evidence(self):

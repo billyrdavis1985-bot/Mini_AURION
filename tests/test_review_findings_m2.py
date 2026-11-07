@@ -71,7 +71,6 @@ class _PricedModel(FakeModel):
 
 class M2Findings(_Tmp):
 
-    @unittest.expectedFailure
     def test_B1_a_missing_anchor_with_receipts_present_is_an_error(self):
         """The anchor sits next to the receipts. Truncate the log AND delete
         the anchor, and verify() treats 'no anchor' as 'nothing to check'.
@@ -86,7 +85,6 @@ class M2Findings(_Tmp):
         with self.assertRaises(ReceiptError):
             self.rs.verify()
 
-    @unittest.expectedFailure
     def test_B3_an_unregistered_mechanical_verifier_is_refused(self):
         """mechanical=True is a flag any caller can pass, so the prefix
         check moved trust onto a boolean. A mechanical verifier should be a
@@ -96,7 +94,6 @@ class M2Findings(_Tmp):
         with self.assertRaises(MemError):
             self.mem.verify(e["id"], "mechanical:agent-a", mechanical=True)
 
-    @unittest.expectedFailure
     def test_B4_an_unreported_cost_settles_at_the_worst_case_not_zero(self):
         """tools.py reads getattr(backend, 'last_cost_nano', 0): a backend
         that reports nothing settles at $0. Unknown cost must be charged at
@@ -108,7 +105,6 @@ class M2Findings(_Tmp):
                     task_id="t", agent_id="s").call("paid_search", {})
         self.assertGreaterEqual(self.spent(), 5_000)
 
-    @unittest.expectedFailure
     def test_B5_model_calls_are_metered_by_default(self):
         """model_estimate_nano defaults to 0, and 0 means 'do not reserve'.
         A specialist built with defaults spends 5,000 per model call and
@@ -127,7 +123,6 @@ class M2Findings(_Tmp):
         spec.investigate("t", "brief")
         self.assertGreaterEqual(self.spent(), 5_000)
 
-    @unittest.expectedFailure
     def test_B6_synthesis_cannot_cite_evidence_no_finding_cited(self):
         """The synthesis passes the critic by citing any file that exists.
         At minimum, its evidence must come from the accepted findings; a
@@ -142,14 +137,15 @@ class M2Findings(_Tmp):
             FakeModel([{"text": "the sky is blue",
                         "evidence": [{"kind": "file", "ref": "a.txt"}]}]),
             ToolWrapper(ToolRegistry(), receipts=self.rs, ledger=self.led,
-                        stage="trusted", task_id="t", agent_id="spec"))
+                        stage="trusted", task_id="t", agent_id="spec"),
+            model_estimate_nano=0)
         orc = Orchestrator(
             "orc",
             FakeModel([{"text": "plan"},
                        {"text": "The sky is blue AND the drug is safe.",
                         "evidence": [{"kind": "file", "ref": "other.txt"}]}]),
             {"spec": spec}, Critic("critic", self.mem), receipts=self.rs,
-            ledger=self.led)
+            ledger=self.led, model_estimate_nano=0)
         self.assertNotEqual(orc.run("t", "q")["status"], "complete")
 
 

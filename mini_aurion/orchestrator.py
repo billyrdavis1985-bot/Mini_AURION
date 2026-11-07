@@ -19,7 +19,11 @@ class _ModelRefused(Exception):
 class Orchestrator:
     def __init__(self, agent_id: str, model, specialists: dict,
                  critic, *, receipts, ledger, message_budget: int = 10,
-                 model_estimate_nano: int = 0):
+                 model_estimate_nano: int):
+        """model_estimate_nano is required: 0 asserts the builder knows the
+        model is free. Metering is never silently off."""
+        if not isinstance(model_estimate_nano, int) or model_estimate_nano < 0:
+            raise ValueError("model_estimate_nano must be a non-negative int")
         self.agent_id = agent_id
         self.model = model
         self.specialists = dict(specialists)
@@ -102,12 +106,21 @@ class Orchestrator:
                 evidence=synthesis.get("evidence", []))
             check = self.critic.check(synth_msg)
             if check["verdict"] == "pass":
-                return self._finish(
-                    task_id, findings, unattempted,
-                    "complete" if not unattempted
-                    and len(accepted) == len(findings) else "partial",
-                    synth_msg.claim, synth_msg.evidence, "")
-            synth_note = f"synthesis failed critic: {check['catches']}"[:300]
+                cited = {(e.get("kind"), e.get("ref"))
+                         for f in accepted for e in f["message"].evidence}
+                fresh = [(e.get("kind"), e.get("ref"))
+                         for e in synth_msg.evidence]
+                if all(pointer in cited for pointer in fresh):
+                    return self._finish(
+                        task_id, findings, unattempted,
+                        "complete" if not unattempted
+                        and len(accepted) == len(findings) else "partial",
+                        synth_msg.claim, synth_msg.evidence, "")
+                synth_note = ("synthesis cited evidence no finding cited: "
+                              f"{[p for p in fresh if p not in cited]}")[:300]
+            else:
+                synth_note = (f"synthesis failed critic:"
+                              f" {check['catches']}")[:300]
         fallback = "PARTIAL: " + "; ".join(
             f["message"].claim for f in accepted)[:2000]
         evidence = []
