@@ -9,25 +9,41 @@ escalation — never a guess.
 from __future__ import annotations
 
 from .fixture import ESCALATE_TEXT
+from .ledger import LedgerError
 from .messages import AgentMessage
-from .tools import NeedsApproval, ToolFailed
+from .tools import NeedsApproval, ToolDenied, ToolFailed
 
 
 class Specialist:
     def __init__(self, agent_id: str, model, tools, *,
-                 max_model_calls: int = 4, max_tool_calls: int = 4):
+                 max_model_calls: int = 4, max_tool_calls: int = 4,
+                 model_estimate_nano: int = 0):
         self.agent_id = agent_id
         self.model = model
         self.tools = tools
         self.max_model_calls = max_model_calls
         self.max_tool_calls = max_tool_calls
+        self.model_estimate_nano = model_estimate_nano
 
     def investigate(self, task_id: str, brief: str) -> AgentMessage:
         messages = [{"role": "brief", "text": brief}]
         tool_calls_made = 0
         cost_nano = 0
         for _ in range(self.max_model_calls):
+            reservation = None
+            if self.model_estimate_nano > 0:
+                try:
+                    reservation = self.tools.ledger.reserve(
+                        task_id, self.model_estimate_nano)
+                except LedgerError as exc:
+                    return self._escalated(
+                        task_id, brief, cost_nano,
+                        f"spend cap refused model call: {exc}")
             reply = self.model.complete(messages, tools=["*"])
+            if reservation is not None:
+                actual = getattr(self.model, "last_cost_nano", 0) or 0
+                self.tools.ledger.settle(reservation, actual)
+                cost_nano += actual
             self.tools.receipts.append(
                 agent_id=self.agent_id, task_id=task_id, action="model_call",
                 detail={"finish": "tools" if reply["tool_calls"] else "answer"},
@@ -52,14 +68,18 @@ class Specialist:
                 tool_calls_made += 1
                 name = call.get("tool", "")
                 args = call.get("args", {})
-                action_class = call.get("class", "READ")
+                # Model-supplied labels are ignored: the registry declares
+                # the tool's class and cost.
                 try:
-                    out = self.tools.call(name, args, action_class)
+                    out = self.tools.call(name, args)
                 except NeedsApproval as exc:
                     return self._escalated(
                         task_id, brief, cost_nano,
                         f"needs approval: {exc.request['action_class']}"
                         f" {exc.request['tool']}")
+                except ToolDenied as exc:
+                    return self._escalated(
+                        task_id, brief, cost_nano, f"tool denied: {exc}")
                 except ToolFailed as exc:
                     messages.append({"role": "tool_error",
                                      "text": f"{name} failed (seq {exc.seq})"})

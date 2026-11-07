@@ -23,6 +23,7 @@ class FakeModel:
         self.script = list(script or [])
         self.model_id = model_id
         self.calls = 0
+        self.last_cost_nano = 0
 
     def complete(self, messages: list[dict], tools: list[str]) -> dict:
         self.calls += 1

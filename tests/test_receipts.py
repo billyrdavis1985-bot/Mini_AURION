@@ -45,14 +45,17 @@ class ReceiptTests(unittest.TestCase):
             self.store.verify()
         self.assertIn(ctx.exception.code, ("BAD_HASH", "CHAIN_BROKEN"))
 
-    def test_truncated_tail_breaks_nothing_but_count_is_honest(self):
+    def test_truncated_tail_is_detected_by_the_anchor(self):
         self.store.append(agent_id="a", task_id="t", action="one")
         self.store.append(agent_id="a", task_id="t", action="two")
         path = self.store.path
         lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
         path.write_text(lines[0], encoding="utf-8")
-        self.assertEqual(self.store.verify(), 1)
-        self.assertEqual(len(self.store), 1)
+        with self.assertRaises(ReceiptError):
+            self.store.verify()
+        with self.assertRaises(ReceiptError) as ctx:
+            self.store.append(agent_id="a", task_id="t", action="three")
+        self.assertEqual(ctx.exception.code, "CHAIN_REWOUND")
 
     def test_blank_lines_are_ignored(self):
         self.store.append(agent_id="a", task_id="t", action="one")

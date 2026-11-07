@@ -28,7 +28,7 @@ class Critic:
                     "by": self.agent_id}
         catches = []
         for item in message.evidence:
-            reason = self.memory.check_source(item)
+            reason = self.memory.check_source(item, message.task_id)
             if reason is not None:
                 catches.append(f"{item.get('kind')}:{item.get('ref')}: {reason}")
         if catches:

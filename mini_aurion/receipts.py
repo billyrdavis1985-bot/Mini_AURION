@@ -44,6 +44,7 @@ class ReceiptStore:
 
     def __init__(self, path: str | os.PathLike[str]):
         self.path = Path(path)
+        self.anchor_path = Path(str(path) + ".anchor")
 
     def __len__(self) -> int:
         if not self.path.exists():
@@ -108,6 +109,12 @@ class ReceiptStore:
                                f"receipt is {len(payload)} bytes, cap is {MAX_RECEIPT_BYTES}")
         receipt = dict(body)
         receipt["hash"] = _digest(payload)
+        anchor = self._read_anchor()
+        if anchor is not None and receipt["seq"] <= anchor["max_seq"]:
+            raise ReceiptError("CHAIN_REWOUND",
+                               f"seq {receipt['seq']} repeats history"
+                               f" (anchor at {anchor['max_seq']}): the store"
+                               " was truncated or replaced")
         line = _canonical(receipt) + b"\n"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -120,7 +127,33 @@ class ReceiptStore:
                 os.chmod(self.path, 0o600)
         except OSError:
             pass
+        self._write_anchor(receipt["seq"], receipt["hash"])
         return receipt
+
+    def _read_anchor(self) -> dict | None:
+        if not self.anchor_path.exists():
+            return None
+        try:
+            anchor = json.loads(self.anchor_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise ReceiptError("ANCHOR_BROKEN",
+                               f"cannot read anchor: {exc}") from exc
+        if not isinstance(anchor.get("max_seq"), int) or \
+                not isinstance(anchor.get("hash"), str):
+            raise ReceiptError("ANCHOR_BROKEN", "anchor is malformed")
+        return anchor
+
+    def _write_anchor(self, seq: int, digest: str) -> None:
+        tmp = self.anchor_path.with_suffix(self.anchor_path.suffix + ".tmp")
+        try:
+            payload = _canonical({"max_seq": seq, "hash": digest})
+            tmp.write_text(payload.decode("utf-8"), encoding="utf-8")
+            os.replace(tmp, self.anchor_path)
+            if os.name == "posix":
+                os.chmod(self.anchor_path, 0o600)
+        except OSError as exc:
+            raise ReceiptError("IO_FAILED",
+                               f"cannot write anchor: {exc}") from exc
 
     def begin(self, *, agent_id: str, task_id: str, action: str,
               tool: str = "", detail: dict | None = None) -> dict:
@@ -208,6 +241,17 @@ class ReceiptStore:
             if target >= settler:
                 raise ReceiptError("CHAIN_BROKEN",
                                    f"seq {settler} settles seq {target}, not earlier")
+        targets = [target for _, target in settle_targets]
+        if len(set(targets)) != len(targets):
+            raise ReceiptError("CHAIN_BROKEN",
+                               "a pending action settles exactly once")
+        anchor = self._read_anchor()
+        if anchor is not None:
+            count = expected_seq - 1
+            if count != anchor["max_seq"] or expected_prev != anchor["hash"]:
+                raise ReceiptError("CHAIN_BROKEN",
+                                   "tail does not match the head anchor:"
+                                   " the store was truncated or replaced")
         return expected_seq - 1
 
 
