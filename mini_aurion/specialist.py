@@ -34,7 +34,7 @@ class Specialist:
         messages = [{"role": "brief", "text": brief}]
         tool_calls_made = 0
         cost_nano = 0
-        for _ in range(self.max_model_calls):
+        for call_no in range(self.max_model_calls):
             reservation = None
             if self.model_estimate_nano > 0:
                 try:
@@ -67,6 +67,14 @@ class Specialist:
                     evidence=reply.get("evidence", []),
                     confidence=reply.get("confidence", 0.0),
                     cost_nano=cost_nano)
+            tools_left = self.max_tool_calls - tool_calls_made
+            models_left = self.max_model_calls - (call_no + 1)
+            if tools_left <= 2 or models_left <= 1:
+                messages.append(
+                    {"role": "budget",
+                     "text": f"{tools_left} tool calls and {models_left}"
+                             " model calls remain. Finish reading and answer"
+                             " now; do not start new exploration."})
             for call in calls:
                 if tool_calls_made >= self.max_tool_calls:
                     return self._escalated(task_id, brief, cost_nano,

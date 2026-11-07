@@ -167,6 +167,7 @@ class Orchestrator:
                              outcome="ok")
         message = self._investigate(task_id, specialist, sub["brief"])
         check = self.critic.check(message)
+        self._record_check(task_id, sub["id"], message, check, attempt=1)
         if check["verdict"] == "pass":
             return {"subtask": sub["id"], "status": "accepted",
                     "message": message}
@@ -180,10 +181,23 @@ class Orchestrator:
             task_id, specialist,
             f"{sub['brief']} [previous answer failed: {'; '.join(check['catches'])[:300]}]")
         recheck = self.critic.check(retry)
+        self._record_check(task_id, sub["id"], retry, recheck, attempt=2)
         if recheck["verdict"] == "pass":
             return {"subtask": sub["id"], "status": "accepted",
                     "message": retry}
         return {"subtask": sub["id"], "status": "escalated", "message": retry}
+
+    def _record_check(self, task_id: str, subtask: str, message,
+                      check: dict, attempt: int) -> None:
+        """Receipt the verdict and the claim behind it. Debugging a run
+        without the claims is guessing."""
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="critic_check",
+            detail={"subtask": subtask, "attempt": attempt,
+                    "verdict": check["verdict"],
+                    "catches": check["catches"][:5],
+                    "claim": message.claim[:500],
+                    "evidence": message.evidence[:10]}, outcome="ok")
 
     def _investigate(self, task_id: str, specialist, brief: str) -> AgentMessage:
         self.messages_used += 1

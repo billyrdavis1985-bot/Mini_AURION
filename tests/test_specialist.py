@@ -53,6 +53,23 @@ class SpecialistTests(unittest.TestCase):
         self.assertIn("model_call", kinds)
         self.assertIn("tool_call", kinds)
 
+    def test_low_budget_warns_model_before_final_calls(self):
+        backend = FakeTools({"read": "bytes"})
+        registry = ToolRegistry()
+        registry.register("read", "READ", 0, backend)
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="trusted", task_id="t1",
+                            agent_id="spec")
+        model = FakeModel(
+            [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]},
+             {"text": "done", "evidence": [], "confidence": 0.5}])
+        spec = Specialist("spec", model, tools, model_estimate_nano=0,
+                          max_model_calls=2, max_tool_calls=8)
+        msg = spec.investigate("t1", "brief")
+        self.assertFalse(msg.escalated)
+        roles = [m.get("role") for m in model.seen[1]]
+        self.assertIn("budget", roles)
+
     def test_model_saying_cannot_verify_escalates(self):
         msg = self.investigate_with([{"text": ESCALATE_TEXT}])
         self.assertTrue(msg.escalated)

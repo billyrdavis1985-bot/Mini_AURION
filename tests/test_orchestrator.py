@@ -84,6 +84,17 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIn("task_end", actions)
         self.assertEqual(actions.count("delegate"), 2)
 
+    def test_critic_verdicts_are_receipted_with_claims(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]})
+        orc.run("t1", "question?")
+        checks = [r for r in self.receipts.read_all()
+                  if r["action"] == "critic_check"]
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["detail"]["verdict"], "pass")
+        self.assertEqual(checks[0]["detail"]["claim"], "A")
+
     def test_failed_answer_gets_one_retry_then_accepts(self):
         orc = self.build(
             plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
