@@ -137,6 +137,15 @@ def _estimate_input_tokens(body_chars: int) -> int:
     return max(1, body_chars // 4)
 
 
+_API_ROLES = frozenset({"system", "user", "assistant", "tool"})
+
+
+def _api_role(role: str) -> str:
+    """Map internal roles (brief, tool_result, subtask ids) onto the API's
+    fixed set. Anything the API doesn't know becomes user text."""
+    return role if role in _API_ROLES else "user"
+
+
 class MuseModel:
     """Live model behind the specialist/orchestrator protocol."""
 
@@ -163,7 +172,7 @@ class MuseModel:
         self.calls += 1
         body = {"model": self.config.model,
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}]
-                + [{"role": m.get("role", "user"),
+                + [{"role": _api_role(str(m.get("role", "user"))),
                     "content": str(m.get("text", ""))[:8000]} for m in messages],
                 "max_tokens": self.config.max_output_tokens,
                 "tool_choice": "auto"}
