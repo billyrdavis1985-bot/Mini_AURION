@@ -16,10 +16,11 @@ from .tools import NeedsApproval, ToolDenied, ToolFailed
 
 class Specialist:
     def __init__(self, agent_id: str, model, tools, *,
-                 max_model_calls: int = 4, max_tool_calls: int = 4,
+                 max_model_calls: int = 6, max_tool_calls: int = 8,
                  model_estimate_nano: int):
         """model_estimate_nano is required: 0 asserts the builder knows the
-        model is free. Metering is never silently off."""
+        model is free. Metering is never silently off. Budgets fit
+        list-then-read exploration (measured live: 4 tools starve it)."""
         if not isinstance(model_estimate_nano, int) or model_estimate_nano < 0:
             raise ValueError("model_estimate_nano must be a non-negative int")
         self.agent_id = agent_id
