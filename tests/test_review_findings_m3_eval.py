@@ -237,7 +237,6 @@ class MalformedToolArguments(unittest.TestCase):
 
 class ReportedCostDropsRetries(_Harness):
 
-    @unittest.expectedFailure
     def test_H4_task_cost_matches_the_ledger_after_a_retry(self):
         """_delegate keeps only the retry's message, and _finish sums
         message.cost_nano, so the failed first attempt's spend vanishes from
