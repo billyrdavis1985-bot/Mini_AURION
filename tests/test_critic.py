@@ -52,6 +52,12 @@ class CriticTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "fail")
         self.assertTrue(any("never read" in c for c in result["catches"]))
 
+    def test_spelling_variants_match(self):
+        self.seed_read("./a.txt")
+        result = self.critic.check(self.msg(
+            evidence=[{"kind": "file", "ref": "a.txt"}]))
+        self.assertEqual(result["verdict"], "pass")
+
     def test_read_in_another_task_does_not_count(self):
         self.seed_read("a.txt", task_id="other-task")
         result = self.critic.check(self.msg(

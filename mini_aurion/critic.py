@@ -10,7 +10,16 @@ ok read of that exact path. Existence is not readership.
 """
 from __future__ import annotations
 
+import posixpath
+
 from .messages import AgentMessage, MessageError
+
+
+def _normalize(path: str) -> str:
+    """Compare read paths and cites by spelling-normalized form, so
+    './note.txt' and 'note.txt' match. Confinement is enforced at the
+    tool, not here."""
+    return posixpath.normpath(path.replace("\\", "/"))
 
 
 class Critic:
@@ -48,7 +57,7 @@ class Critic:
         return {"verdict": "pass", "catches": [], "by": self.agent_id}
 
     def _was_read(self, task_id: str, ref: str) -> bool:
-        path = ref.partition(":")[0]
+        path = _normalize(ref.partition(":")[0])
         begun: set[int] = set()
         records = self.receipts.read_all()
         for record in records:
@@ -57,7 +66,7 @@ class Critic:
             if record.get("action") == "tool_call" \
                     and record.get("tool") in self.read_tools:
                 args = (record.get("detail") or {}).get("args", {})
-                if args.get("path") == path:
+                if _normalize(str(args.get("path", ""))) == path:
                     begun.add(record.get("seq", -1))
         for record in records:
             if record.get("action") == "settle" \

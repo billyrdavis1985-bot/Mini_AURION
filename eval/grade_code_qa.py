@@ -17,7 +17,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
+import posixpath
+import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -72,6 +73,19 @@ class TreeReader:
         return "\n".join(entries)
 
 
+def _norm(path: str) -> str:
+    return posixpath.normpath(path.replace("\\", "/"))
+
+
+def tree_commit(tree: Path) -> str | None:
+    try:
+        done = subprocess.run(["git", "-C", str(tree), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=15)
+    except Exception:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
 def line_contains(tree: Path, path: str, lineno: int, text: str) -> bool:
     try:
         lines = (tree / path).read_text(encoding="utf-8").splitlines()
@@ -98,7 +112,7 @@ def grade_code(case: dict, claim: str, evidence: list, escalated: bool,
         path_part, _, line_part = ref.partition(":")
         if not line_part.isdigit():
             continue
-        if path_part != expect["path"]:
+        if _norm(path_part) != _norm(expect["path"]):
             continue
         if line_contains(tree, path_part, int(line_part),
                          expect["line_contains"]):
@@ -125,7 +139,8 @@ def grade_summary(case: dict, text: str, evidence: list, escalated: bool,
             continue
         ref = str(item.get("ref", ""))
         path_part, _, line_part = ref.partition(":")
-        if path_part != expect["path"] or not line_part.isdigit():
+        if _norm(path_part) != _norm(expect["path"]) \
+                or not line_part.isdigit():
             continue
         lineno = int(line_part)
         if lo <= lineno <= hi:
@@ -158,10 +173,20 @@ def grade(case: dict, result: dict, tree: Path) -> tuple[bool, list[str]]:
     return grade_unanswerable(result["text"], escalated)
 
 
+def _fresh_dir(path: Path) -> Path:
+    """A fresh directory per run. Earlier runs' receipts are never deleted;
+    reruns spill to -a2, -a3, ... (OPERATIONS 5 and 7)."""
+    if not path.exists():
+        return path
+    n = 2
+    while (path.parent / f"{path.name}-a{n}").exists():
+        n += 1
+    return path.parent / f"{path.name}-a{n}"
+
+
 def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger) -> dict:
-    if state_dir.exists():
-        shutil.rmtree(state_dir)
+    state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
     memory = Memory(state_dir / "memory.sqlite3", file_root=tree,
@@ -224,6 +249,12 @@ def main(argv=None) -> int:
         return 2
     print(f"model: {config.model} at {config.input_usd_per_m}/"
           f"{config.output_usd_per_m} USD per M tokens (in/out)")
+    frozen = json.loads(CASES_PATH.read_text())["frozen_commit"]
+    got = tree_commit(tree)
+    if got != frozen:
+        print(f"refusing to run: tree is at {got}, eval is frozen at"
+              f" {frozen}")
+        return 2
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     eval_dir = out_path.parent / "code-qa-v1"

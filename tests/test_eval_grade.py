@@ -41,6 +41,15 @@ class GraderTests(unittest.TestCase):
             self.tree)
         self.assertTrue(ok, reasons)
 
+    def test_code_dot_slash_cite_passes(self):
+        ok, reasons = grade(
+            CASES["qa-unknown-tool"],
+            result("ToolRegistry.get raises UNKNOWN_TOOL; caller writes"
+                   " action denied",
+                   [{"kind": "file", "ref": "./mini_aurion/tools.py:4"}]),
+            self.tree)
+        self.assertTrue(ok, reasons)
+
     def test_code_wrong_function_fails(self):
         ok, _ = grade(
             CASES["qa-unknown-tool"],

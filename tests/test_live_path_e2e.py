@@ -210,7 +210,6 @@ class LivePathRegression(_LiveHarness):
 
 class ReviewFindingsPR11(_LiveHarness):
 
-    @unittest.expectedFailure
     def test_F1_a_read_path_and_its_cite_are_compared_normalized(self):
         """The critic compares the read path and the cited path as raw
         strings. An honest model that reads './note.txt' and cites
@@ -225,7 +224,6 @@ class ReviewFindingsPR11(_LiveHarness):
         result, _ = self.run_task("Report note.txt's topic. Cite the file.")
         self.assertEqual(result["status"], "complete")
 
-    @unittest.expectedFailure
     def test_F2_a_rerun_does_not_delete_the_previous_runs_receipts(self):
         """run_live() rmtree's its state directory before every run, so
         re-running the eval destroys the earlier run's receipts.
@@ -248,7 +246,6 @@ class ReviewFindingsPR11(_LiveHarness):
                         and "earlier" in (state / "receipts.jsonl").read_text(),
                         "the earlier run's receipts were deleted")
 
-    @unittest.expectedFailure
     def test_F3_the_grader_refuses_a_tree_that_is_not_the_frozen_commit(self):
         """main() never checks that --tree is a checkout of frozen_commit.
         Pointed at the live repo, the model can list_dir its way to
