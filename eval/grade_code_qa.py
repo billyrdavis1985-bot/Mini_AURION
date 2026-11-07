@@ -221,8 +221,9 @@ def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
                         "required": ["path"]})
         registry.register(
             "list_dir", "READ", 0, reader,
-            description="List a directory in the repo tree. Start here"
-                        " to discover the layout.",
+            description="List a directory in the repo tree. Start with"
+                        " path \".\" (the tree root, never \"/\"), then read"
+                        " the file most likely to hold the answer.",
             parameters={"type": "object",
                         "properties": {"path": {"type": "string"}}})
         model = MuseModel(MuseConfig.from_env())
@@ -301,6 +302,7 @@ def main(argv=None) -> int:
             passes += ok
             details.append({"run": n + 1, "pass": ok, "reasons": reasons,
                             "status": result["status"],
+                            "text": result["text"][:1000],
                             "spent_nano": result.get("spent_nano", 0)})
             print(f"{case['id']} run {n + 1}/{args.runs}:"
                   f" {'PASS' if ok else 'FAIL ' + str(reasons)}")

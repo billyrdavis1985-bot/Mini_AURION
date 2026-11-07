@@ -92,7 +92,8 @@ def live_check(corpus_dir: str, state_dir: str, cap_usd: str) -> int:
                         "required": ["path"]})
         registry.register(
             "list_dir", "READ", 0, reader,
-            description="List a directory in the corpus.",
+            description="List a directory in the corpus. Start with"
+                        " path \".\" (the corpus root, never \"/\").",
             parameters={"type": "object",
                         "properties": {"path": {"type": "string"}}})
         model = MuseModel(config)
