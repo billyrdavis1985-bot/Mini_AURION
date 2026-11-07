@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval.grade_code_qa import grade  # noqa: E402
+from eval.grade_code_qa import TreeReader, grade  # noqa: E402
 
 CASES = {c["id"]: c for c in json.loads(
     (Path(__file__).resolve().parent.parent / "eval" / "code_qa_v1.json")
@@ -101,6 +101,29 @@ class GraderTests(unittest.TestCase):
                              [{"kind": "file", "ref": "mail.py:1"}]),
                       self.tree)
         self.assertFalse(ok)
+
+    def test_list_dir_shows_layout(self):
+        reader = TreeReader(self.tree)
+        top = reader.call("list_dir", {"path": "."}).splitlines()
+        self.assertIn("mini_aurion/", top)
+        self.assertIn("OPERATIONS.md", top)
+        sub = reader.call("list_dir", {"path": "mini_aurion"}).splitlines()
+        self.assertEqual(sub, ["tools.py"])
+
+    def test_list_dir_escape_is_refused(self):
+        reader = TreeReader(self.tree)
+        with self.assertRaises(PermissionError):
+            reader.call("list_dir", {"path": ".."})
+
+    def test_list_dir_on_file_is_refused(self):
+        reader = TreeReader(self.tree)
+        with self.assertRaises(NotADirectoryError):
+            reader.call("list_dir", {"path": "OPERATIONS.md"})
+
+    def test_unknown_tool_is_refused(self):
+        reader = TreeReader(self.tree)
+        with self.assertRaises(KeyError):
+            reader.call("delete_tree", {})
 
     def test_cases_file_is_frozen(self):
         frozen = json.loads(
