@@ -252,10 +252,14 @@ class MuseModel:
         for call in message.get("tool_calls", []) or []:
             try:
                 function = call.get("function", {})
+                args = function.get("arguments", "{}") or "{}"
+                # Some servers send arguments as an object already; anything
+                # else unparseable skips the call, per the module rule.
+                if not isinstance(args, dict):
+                    args = json.loads(args)
                 tool_calls.append({"tool": str(function.get("name", "")),
-                                   "args": json.loads(
-                                       function.get("arguments", "{}") or "{}")})
-            except (ValueError, AttributeError):
+                                   "args": args})
+            except (ValueError, AttributeError, TypeError):
                 continue
         content = message.get("content") or ""
         if tool_calls:

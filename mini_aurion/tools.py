@@ -108,6 +108,15 @@ class ToolWrapper:
         action_class = spec["class"]
         estimate_nano = spec["estimate"]
         backend = spec["backend"]
+        if not isinstance(args, dict):
+            self.receipts.append(agent_id=self.agent_id, task_id=self.task_id,
+                                 action="denied", tool=name,
+                                 detail={"class": action_class,
+                                         "reason": "BAD_ARGS: arguments must"
+                                                   " be an object"},
+                                 outcome="denied")
+            raise ToolDenied("BAD_ARGS", f"{name}: arguments must be"
+                                        " an object")
         verdict, reason = policy.decide(self.stage, action_class,
                                         approved=approved,
                                         allowlisted=allowlisted)

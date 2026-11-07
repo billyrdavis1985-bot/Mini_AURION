@@ -189,7 +189,6 @@ class MalformedToolArguments(unittest.TestCase):
         self.led.close()
         self._tmp.cleanup()
 
-    @unittest.expectedFailure
     def test_H3_non_object_args_fail_the_call_not_the_task(self):
         """ToolWrapper.call does dict(args) while building the receipt. A
         model whose arguments decode to null, a string or a number (json
@@ -217,7 +216,6 @@ class MalformedToolArguments(unittest.TestCase):
                 self.assertGreater(len(self.receipts), before,
                                    "the attempt left no receipt")
 
-    @unittest.expectedFailure
     def test_H3_object_arguments_from_the_api_do_not_crash_the_adapter(self):
         """muse.py's own rule: unparseable answers become evidence-free
         replies. _to_reply catches ValueError and AttributeError around
