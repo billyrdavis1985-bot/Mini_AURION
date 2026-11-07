@@ -13,6 +13,11 @@ from .ledger import LedgerError
 from .messages import AgentMessage
 from .tools import NeedsApproval, ToolDenied, ToolFailed
 
+# Per-tool-result cap. 2000 hid a graded answer sitting at byte ~2500 of a
+# 6173-byte file (measured live); 12000 covers whole source files while
+# still bounding context. Truncation is always marked, never silent.
+MAX_TOOL_CHARS = 12000
+
 
 class Specialist:
     def __init__(self, agent_id: str, model, tools, *,
@@ -99,8 +104,15 @@ class Specialist:
                                      "text": f"{name} failed (seq {exc.seq})"})
                     continue
                 cost_nano += out["cost_nano"]
+                full = str(out["result"])
+                if len(full) > MAX_TOOL_CHARS:
+                    text = (full[:MAX_TOOL_CHARS] +
+                            f"\n[truncated: showing {MAX_TOOL_CHARS} of"
+                            f" {len(full)} chars]")
+                else:
+                    text = full
                 messages.append({"role": "tool_result", "tool": name,
-                                 "text": str(out["result"])[:2000]})
+                                 "text": text})
         return self._escalated(task_id, brief, cost_nano,
                                "model budget exhausted")
 

@@ -130,6 +130,13 @@ class GraderTests(unittest.TestCase):
         with self.assertRaises(NotADirectoryError):
             reader.call("list_dir", {"path": "OPERATIONS.md"})
 
+    def test_read_file_numbers_lines(self):
+        reader = TreeReader(self.tree)
+        out = reader.call("read_file", {"path": "mini_aurion/tools.py"})
+        lines = out.splitlines()
+        self.assertEqual(lines[0], '1: """x"""')
+        self.assertEqual(lines[3], "4:     def get(self):")
+
     def test_unknown_tool_is_refused(self):
         reader = TreeReader(self.tree)
         with self.assertRaises(KeyError):
