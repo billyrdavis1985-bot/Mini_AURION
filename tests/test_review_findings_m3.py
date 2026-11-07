@@ -1,8 +1,7 @@
-"""Reviewer findings on #15-#17, written as tests that FAIL today.
+"""Reviewer findings on #15-#17, kept as regression tests.
 
-Same contract as the other test_review_findings*.py files: expectedFailure
-keeps the suite green; a fix turns into an unexpected success and fails the
-suite until its marker is deleted.
+Both findings are fixed; the expectedFailure markers were deleted with
+the fix, per the review-findings contract.
 
 No network beyond 127.0.0.1, no API key, $0.
 """
@@ -61,7 +60,6 @@ class AdapterTruncation(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=5)
 
-    @unittest.expectedFailure
     def test_G1_a_tool_result_the_specialist_kept_reaches_the_model(self):
         """#17 lifted the specialist's per-result cap to 12000 and promised
         truncation is 'always marked, never silent'. muse._api_message then
@@ -101,7 +99,6 @@ class IgnoredFilesInTheEvalTree(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    @unittest.expectedFailure
     def test_G2_ignored_files_are_neither_clean_nor_visible(self):
         """tree_clean() runs `git status --porcelain`, which hides ignored
         paths, and the frozen tree ignores var/ (where live-check writes).

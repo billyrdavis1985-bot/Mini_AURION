@@ -111,11 +111,13 @@ def repo_state(repo: Path) -> tuple[str | None, bool]:
 def tree_clean(tree: Path) -> bool:
     """The eval tree must be exactly the frozen commit. Tracked edits shift
     graded line numbers; untracked files are visible to the model, and a
-    stray answer key would invalidate every score."""
+    stray answer key would invalidate every score. Ignored paths count too:
+    the reader shows everything on disk, so `var/` junk fails the check
+    just like any other stray file."""
     try:
         done = subprocess.run(["git", "-C", str(tree), "status",
-                               "--porcelain"], capture_output=True, text=True,
-                              timeout=15)
+                               "--porcelain", "--ignored"],
+                              capture_output=True, text=True, timeout=15)
     except Exception:
         return False
     return done.returncode == 0 and not done.stdout.strip()
