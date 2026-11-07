@@ -8,8 +8,8 @@ Network): an orchestrated multi-LLM system for real-world problems. This repo
 is the lighter build-and-test version. If it works, it helps build the full
 system.
 
-**Status: Milestone 2** — reviewer hardening: all 17 findings plus 5
-follow-ups fixed, 123 tests green. Still fixtures only; no live calls yet.
+**Status: Milestone 3** — live Muse adapter proven against a fake API
+(11 tests), `live-check` CLI ready for the operator's keyed run.
 
 ## Rules
 
@@ -42,6 +42,7 @@ No API key, no network, no spend. All Milestone 0 tests run on fixtures.
 | `mini_aurion/specialist.py` | bounded tool-loop investigator, escalates honestly |
 | `mini_aurion/critic.py` | tool-less citation verifier, scored on catches |
 | `mini_aurion/orchestrator.py` | hub-spoke runner: delegate, verify, retry, synthesize |
+| `mini_aurion/muse.py` | live Muse adapter: metered, fail-closed, pinned prompt |
 | `mini_aurion/fixture.py` | scripted fake model + tools for $0 tests |
 | `tests/` | suite over disposable state |
 | `OPERATIONS.md` | operating constitution |
