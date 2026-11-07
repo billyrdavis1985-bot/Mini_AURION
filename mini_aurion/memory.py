@@ -45,6 +45,7 @@ class Memory:
         self.root = Path(file_root).resolve()
         self.receipts = receipt_store
         self.fetched = fetched_urls if fetched_urls is not None else set()
+        self.mechanical_checks: set[str] = set()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path))
         self.db.execute(
@@ -173,12 +174,21 @@ class Memory:
                 "created_at": row[7], "expires_at": row[8],
                 "derived_from": json.loads(row[9]), "task_id": row[10]}
 
+    def register_mechanical(self, check_id: str) -> None:
+        """Register a mechanical check id. Only operator code calls this."""
+        if not check_id or not isinstance(check_id, str):
+            raise MemoryError("BAD_FIELD", "check id must be non-empty")
+        if check_id.startswith("mechanical:"):
+            raise MemoryError("BAD_FIELD", "check ids carry no prefix")
+        self.mechanical_checks.add(check_id)
+
     def verify(self, entry_id: str, verifier: str, *,
                mechanical: bool = False) -> dict:
         """Mark verified. Verifier must differ from the author. Mechanical
-        checks pass mechanical=True; the 'mechanical:' string prefix alone
-        proves nothing and is refused. Disputed entries and entries with no
-        sources can never verify. Sources re-resolve first."""
+        checks pass mechanical=True AND a registered id; the flag alone or
+        a 'mechanical:'-prefixed string proves nothing. Disputed entries
+        and entries with no sources can never verify. Sources re-resolve
+        first."""
         entry = self.get(entry_id)
         if entry["status"] == "verified":
             raise MemoryError("BAD_STATE", "entry is already verified")
@@ -190,9 +200,12 @@ class Memory:
                               "a claim with no sources cannot verify")
         if not verifier or not isinstance(verifier, str):
             raise MemoryError("BAD_FIELD", "verifier must be a non-empty string")
-        if verifier.startswith("mechanical:") and not mechanical:
+        if verifier.startswith("mechanical:"):
             raise MemoryError("MECHANICAL_SPOOF",
-                              "mechanical verifiers arrive via code, not strings")
+                              "prefixed verifier strings are never accepted")
+        if mechanical and verifier not in self.mechanical_checks:
+            raise MemoryError("UNREGISTERED_CHECK",
+                              f"{verifier!r} is not a registered check")
         if verifier == entry["author"]:
             raise MemoryError("SELF_VERIFY",
                               "author cannot verify its own entry")

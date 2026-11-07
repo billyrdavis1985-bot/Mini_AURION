@@ -113,6 +113,22 @@ class ToolWrapperTests(unittest.TestCase):
         self.assertEqual(receipts[1]["outcome"], "failed")
         self.assertEqual(self.receipts.verify(), 2)
 
+    def test_silent_backend_settles_at_worst_case(self):
+        class Silent:
+            def call(self, name, args):
+                return "r"
+        out = self.wrap([("s", "READ", 5_000, Silent())]).call("s", {})
+        self.assertEqual(out["cost_nano"], 5_000)
+        self.assertEqual(self.ledger.spend("t1")["settled_nano"], 5_000)
+
+    def test_silent_free_tool_settles_zero(self):
+        class Silent:
+            def call(self, name, args):
+                return "r"
+        out = self.wrap([("s", "READ", 0, Silent())]).call("s", {})
+        self.assertEqual(out["cost_nano"], 0)
+        self.assertEqual(self.ledger.totals()["settled_nano"], 0)
+
     def test_unknown_tool_is_refused_and_receipted(self):
         wrapper = self.wrap([("r", "READ", 0, FakeTools({"r": "v"}))])
         with self.assertRaises(ToolDenied) as ctx:

@@ -254,11 +254,13 @@ class AgentLoopFindings(_Tmp):
                            stage=stage, task_id="t", agent_id=agent)
 
     def orchestrator(self, plan, spec_script, synth=None, budget=10):
-        spec = Specialist("spec", FakeModel(spec_script), self.wrapper())
+        spec = Specialist("spec", FakeModel(spec_script), self.wrapper(),
+                          model_estimate_nano=0)
         script = [plan] + ([synth] if synth else [])
         return Orchestrator("orc", FakeModel(script), {"spec": spec},
                             Critic("critic", self.mem), receipts=self.rs,
-                            ledger=self.led, message_budget=budget)
+                            ledger=self.led, message_budget=budget,
+                            model_estimate_nano=0)
 
     def test_A1_the_model_does_not_choose_its_own_action_class(self):
         """specialist.py reads call.get('class', 'READ'): the MODEL labels
@@ -267,7 +269,7 @@ class AgentLoopFindings(_Tmp):
         spec = Specialist("spec", FakeModel([
             {"tool_calls": [{"tool": "delete_everything", "args": {}}]},
             {"text": "done", "evidence": [{"kind": "file", "ref": "a.txt"}]},
-        ]), self.wrapper("experimental"))
+        ]), self.wrapper("experimental"), model_estimate_nano=0)
         spec.investigate("t", "brief")
         self.assertEqual(self.backend.invocations, [])
 
@@ -278,7 +280,8 @@ class AgentLoopFindings(_Tmp):
         spec = Specialist("spec", FakeModel([
             {"tool_calls": [{"tool": "delete_everything", "args": {}}]},
             {"text": "done", "evidence": [{"kind": "file", "ref": "a.txt"}]},
-        ]), self.wrapper("trusted", tool_class="READ", estimate=5_000))
+        ]), self.wrapper("trusted", tool_class="READ", estimate=5_000),
+            model_estimate_nano=0)
         spec.investigate("t", "brief")
         totals = self.led.totals()
         self.assertEqual(totals["settled_nano"] + totals["inflight_nano"],
@@ -323,12 +326,13 @@ class AgentLoopFindings(_Tmp):
         three = {"text": "p", "subtasks": [
             {"id": f"s{i}", "brief": "b", "specialist": "spec"}
             for i in range(3)]}
-        spec = Specialist("spec", FakeModel([ok] * 10), self.wrapper("trusted"))
+        spec = Specialist("spec", FakeModel([ok] * 10), self.wrapper("trusted"),
+                          model_estimate_nano=0)
         synth = {"text": "s", "evidence": [{"kind": "file", "ref": "a.txt"}]}
         orc = Orchestrator("orc", FakeModel([three, synth] * 2),
                            {"spec": spec}, Critic("critic", self.mem),
                            receipts=self.rs, ledger=self.led,
-                           message_budget=4)
+                           message_budget=4, model_estimate_nano=0)
         self.assertEqual(orc.run("t1", "q")["status"], "complete")
         self.assertEqual(orc.run("t2", "q")["status"], "complete")
 

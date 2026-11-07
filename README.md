@@ -8,8 +8,8 @@ Network): an orchestrated multi-LLM system for real-world problems. This repo
 is the lighter build-and-test version. If it works, it helps build the full
 system.
 
-**Status: Milestone 2** — reviewer hardening: all 17 findings fixed,
-115 tests green. Still fixtures only; no live model calls yet.
+**Status: Milestone 2** — reviewer hardening: all 17 findings plus 5
+follow-ups fixed, 123 tests green. Still fixtures only; no live calls yet.
 
 ## Rules
 
