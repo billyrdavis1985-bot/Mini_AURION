@@ -42,7 +42,8 @@ class Ledger:
         self.global_cap = global_cap_nano
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(self.path))
+        self.db = sqlite3.connect(str(self.path), timeout=10.0,
+                                  isolation_level=None)
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS reservations ("
             " id TEXT PRIMARY KEY, task_id TEXT NOT NULL,"
@@ -89,22 +90,29 @@ class Ledger:
         if not isinstance(worst_case_nano, int) or worst_case_nano <= 0:
             raise LedgerError("BAD_FIELD", "worst_case_nano must be a positive int")
         day = _today()
-        if self._task_live(task_id) + worst_case_nano > self.task_cap:
-            raise LedgerError("CAP_EXCEEDED",
-                              f"task cap {self.task_cap} would break")
-        if self._day_live(day) + worst_case_nano > self.daily_cap:
-            raise LedgerError("CAP_EXCEEDED",
-                              f"daily cap {self.daily_cap} would break")
-        if self._global_live() + worst_case_nano > self.global_cap:
-            raise LedgerError("CAP_EXCEEDED",
-                              f"global cap {self.global_cap} would break")
-        rid = "rsv_" + uuid.uuid4().hex[:16]
-        self.db.execute(
-            "INSERT INTO reservations (id, task_id, estimate_nano, state, day,"
-            " created_at) VALUES (?,?,?,?,?,?)",
-            (rid, task_id, worst_case_nano, "reserved", day,
-             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
-        self.db.commit()
+        # BEGIN IMMEDIATE closes the check-then-insert race: concurrent
+        # reservers serialize here instead of all reading the same total.
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if self._task_live(task_id) + worst_case_nano > self.task_cap:
+                raise LedgerError("CAP_EXCEEDED",
+                                  f"task cap {self.task_cap} would break")
+            if self._day_live(day) + worst_case_nano > self.daily_cap:
+                raise LedgerError("CAP_EXCEEDED",
+                                  f"daily cap {self.daily_cap} would break")
+            if self._global_live() + worst_case_nano > self.global_cap:
+                raise LedgerError("CAP_EXCEEDED",
+                                  f"global cap {self.global_cap} would break")
+            rid = "rsv_" + uuid.uuid4().hex[:16]
+            self.db.execute(
+                "INSERT INTO reservations (id, task_id, estimate_nano, state,"
+                " day, created_at) VALUES (?,?,?,?,?,?)",
+                (rid, task_id, worst_case_nano, "reserved", day,
+                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
+        self.db.execute("COMMIT")
         return rid
 
     def settle(self, reservation_id: str, actual_nano: int) -> bool:

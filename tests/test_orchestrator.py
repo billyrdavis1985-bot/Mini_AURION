@@ -9,7 +9,7 @@ from mini_aurion.memory import Memory
 from mini_aurion.orchestrator import Orchestrator
 from mini_aurion.receipts import ReceiptStore
 from mini_aurion.specialist import Specialist
-from mini_aurion.tools import ToolWrapper
+from mini_aurion.tools import ToolRegistry, ToolWrapper
 
 CAPS = {"task_cap_nano": 100_000, "daily_cap_nano": 500_000,
         "global_cap_nano": 1_000_000}
@@ -43,17 +43,20 @@ class OrchestratorTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def build(self, plan_reply, spec_scripts, synth_text="done",
-              budget=10):
-        orc_model = FakeModel([plan_reply, {"text": synth_text}])
+              budget=10, synth_evidence=None):
+        synth = {"text": synth_text,
+                 "evidence": synth_evidence
+                 if synth_evidence is not None else GOOD_EVIDENCE}
+        orc_model = FakeModel([plan_reply, synth])
         specialists = {}
         for name, script in spec_scripts.items():
-            tools = ToolWrapper(FakeTools({}), receipts=self.receipts,
+            tools = ToolWrapper(ToolRegistry(), receipts=self.receipts,
                                 ledger=self.ledger, stage="trusted",
                                 task_id="t1", agent_id=name)
             specialists[name] = Specialist(name, FakeModel(script), tools)
         orc = Orchestrator("orc", orc_model, specialists,
                            Critic("critic", self.mem), receipts=self.receipts,
-                           message_budget=budget)
+                           ledger=self.ledger, message_budget=budget)
         return orc
 
     def test_happy_path_completes_with_combined_evidence(self):
@@ -65,7 +68,7 @@ class OrchestratorTests(unittest.TestCase):
         result = orc.run("t1", "question?")
         self.assertEqual(result["status"], "complete")
         self.assertEqual(result["text"], "A and B")
-        self.assertEqual(len(result["evidence"]), 2)
+        self.assertEqual(result["evidence"], GOOD_EVIDENCE)
         self.assertEqual(self.receipts.verify(), self.receipts.verify())
         actions = [r["action"] for r in self.receipts.read_all()]
         self.assertIn("task_start", actions)
@@ -123,6 +126,17 @@ class OrchestratorTests(unittest.TestCase):
         result = orc.run("t1", "q?")
         self.assertEqual(result["status"], "escalated")
         self.assertIn("CANNOT_VERIFY", result["text"])
+
+    def test_unevidenced_synthesis_drops_to_partial(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("good")]},
+            synth_text="good plus extra claims", synth_evidence=[])
+        result = orc.run("t1", "q?")
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["text"].startswith("PARTIAL:"))
+        self.assertIn("good", result["text"])
+        self.assertNotIn("extra claims", result["text"])
 
 
 if __name__ == "__main__":

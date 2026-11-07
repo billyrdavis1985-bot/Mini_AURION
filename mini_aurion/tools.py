@@ -7,6 +7,10 @@ tool without a receipt, and no path that spends without a reservation.
 
 Backend protocol: `call(name, args)` returns a result (or raises), and the
 optional attribute `last_cost_nano` reports what the last call cost.
+
+Tool identity is server-side: a ToolRegistry declares each tool's action
+class and worst-case cost. Model-supplied labels are ignored entirely; an
+unlabeled or unknown tool is refused, never defaulted to READ.
 """
 from __future__ import annotations
 
@@ -34,19 +38,57 @@ class ToolFailed(Exception):
         self.seq = seq
 
 
+class ToolRegistry:
+    """Server-side tool identities: class + worst-case cost per tool."""
+
+    def __init__(self):
+        self._tools: dict[str, tuple[str, int, object]] = {}
+
+    def register(self, name: str, action_class: str, worst_case_nano: int,
+                 backend) -> None:
+        if not name or not isinstance(name, str):
+            raise ToolDenied("BAD_TOOL_DEF", "tool name must be non-empty")
+        if action_class not in policy.CLASSES:
+            raise ToolDenied("BAD_TOOL_DEF",
+                             f"class must be one of {policy.CLASSES}")
+        if not isinstance(worst_case_nano, int) or worst_case_nano < 0:
+            raise ToolDenied("BAD_TOOL_DEF",
+                             "worst_case_nano must be a non-negative int")
+        if not hasattr(backend, "call"):
+            raise ToolDenied("BAD_TOOL_DEF", "backend needs a call method")
+        if name in self._tools:
+            raise ToolDenied("BAD_TOOL_DEF", f"{name!r} is already registered")
+        self._tools[name] = (action_class, worst_case_nano, backend)
+
+    def get(self, name: str) -> tuple[str, int, object]:
+        try:
+            return self._tools[name]
+        except KeyError:
+            raise ToolDenied("UNKNOWN_TOOL",
+                             f"{name!r} is not registered") from None
+
+
 class ToolWrapper:
-    def __init__(self, backend, *, receipts: ReceiptStore,
+    def __init__(self, registry: ToolRegistry, *, receipts: ReceiptStore,
                  ledger, stage: str, task_id: str, agent_id: str):
-        self.backend = backend
+        self.registry = registry
         self.receipts = receipts
         self.ledger = ledger
         self.stage = stage
         self.task_id = task_id
         self.agent_id = agent_id
 
-    def call(self, name: str, args: dict, action_class: str, *,
-             estimate_nano: int = 0, approved: bool = False,
+    def call(self, name: str, args: dict, *, approved: bool = False,
              allowlisted: bool = False) -> dict:
+        try:
+            action_class, estimate_nano, backend = self.registry.get(name)
+        except ToolDenied as exc:
+            self.receipts.append(agent_id=self.agent_id, task_id=self.task_id,
+                                 action="denied", tool=name,
+                                 detail={"class": "UNKNOWN",
+                                         "reason": str(exc)},
+                                 outcome="denied")
+            raise
         verdict, reason = policy.decide(self.stage, action_class,
                                         approved=approved,
                                         allowlisted=allowlisted)
@@ -81,14 +123,14 @@ class ToolWrapper:
                                     task_id=self.task_id, action="tool_call",
                                     tool=name, detail={"args": dict(args)})
         try:
-            result = self.backend.call(name, args)
+            result = backend.call(name, args)
             return_code = 0
             error = ""
         except Exception as exc:  # noqa: BLE001 - any backend failure settles failed
             result = None
             return_code = 1
             error = str(exc)
-        actual = getattr(self.backend, "last_cost_nano", 0) or 0
+        actual = getattr(backend, "last_cost_nano", 0) or 0
         if reservation is not None:
             self.ledger.settle(reservation, actual)
         self.receipts.settle(begun["seq"], return_code, cost_nano=actual)

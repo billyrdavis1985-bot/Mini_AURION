@@ -15,8 +15,8 @@ class MemoryTests(unittest.TestCase):
         with open(os.path.join(self.root, "paper.txt"), "w") as fh:
             fh.write("real content")
         self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
-        self.rcpt = self.receipts.append(agent_id="a", task_id="t",
-                                         action="act")
+        begun = self.receipts.begin(agent_id="a", task_id="t", action="act")
+        self.rcpt = self.receipts.settle(begun["seq"], 0)
         self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
                           file_root=self.root, receipt_store=self.receipts,
                           fetched_urls={"https://example.com/x"})
@@ -49,6 +49,18 @@ class MemoryTests(unittest.TestCase):
                                [{"kind": "receipt", "ref": 999}])
         self.assertIn("unknown receipt seq", entry["reason"])
 
+    def test_log_line_receipt_is_not_evidence(self):
+        log = self.receipts.append(agent_id="a", task_id="t", action="note")
+        entry = self.mem.write("spec", "claim",
+                               [{"kind": "receipt", "ref": log["seq"]}])
+        self.assertIn("not settled work", entry["reason"])
+
+    def test_other_tasks_receipt_is_not_evidence(self):
+        entry = self.mem.write("spec", "claim",
+                               [{"kind": "receipt", "ref": self.rcpt["seq"]}],
+                               task_id="other-task")
+        self.assertIn("belongs to task", entry["reason"])
+
     def test_unfetched_url_is_caught(self):
         entry = self.mem.write("spec", "claim",
                                [{"kind": "url", "ref": "https://evil.test/y"}])
@@ -64,8 +76,16 @@ class MemoryTests(unittest.TestCase):
     def test_mechanical_check_can_verify(self):
         entry = self.mem.write("spec", "claim",
                                [{"kind": "file", "ref": "paper.txt"}])
-        verified = self.mem.verify(entry["id"], "mechanical:citation-resolve")
+        verified = self.mem.verify(entry["id"], "citation-resolve",
+                                   mechanical=True)
         self.assertEqual(verified["status"], "verified")
+
+    def test_mechanical_prefix_without_flag_is_refused(self):
+        entry = self.mem.write("spec", "claim",
+                               [{"kind": "file", "ref": "paper.txt"}])
+        with self.assertRaises(MemoryError) as ctx:
+            self.mem.verify(entry["id"], "mechanical:spec")
+        self.assertEqual(ctx.exception.code, "MECHANICAL_SPOOF")
 
     def test_self_verify_is_refused(self):
         entry = self.mem.write("spec", "claim",

@@ -5,7 +5,8 @@ import unittest
 from mini_aurion.fixture import FakeTools
 from mini_aurion.ledger import Ledger, LedgerError
 from mini_aurion.receipts import ReceiptStore
-from mini_aurion.tools import NeedsApproval, ToolDenied, ToolFailed, ToolWrapper
+from mini_aurion.tools import (NeedsApproval, ToolDenied, ToolFailed,
+                               ToolRegistry, ToolWrapper)
 
 CAPS = {"task_cap_nano": 10_000, "daily_cap_nano": 50_000,
         "global_cap_nano": 100_000}
@@ -42,12 +43,17 @@ class ToolWrapperTests(unittest.TestCase):
         self.ledger.close()
         self.tmp.cleanup()
 
-    def wrap(self, backend, stage="trusted"):
-        return ToolWrapper(backend, receipts=self.receipts, ledger=self.ledger,
-                           stage=stage, task_id="t1", agent_id="spec")
+    def wrap(self, entries, stage="trusted"):
+        registry = ToolRegistry()
+        for name, action_class, estimate, backend in entries:
+            registry.register(name, action_class, estimate, backend)
+        return ToolWrapper(registry, receipts=self.receipts,
+                           ledger=self.ledger, stage=stage, task_id="t1",
+                           agent_id="spec")
 
     def test_read_call_leaves_begin_settle_receipts(self):
-        out = self.wrap(FakeTools({"r": "bytes"})).call("r", {}, "READ")
+        out = self.wrap([("r", "READ", 0, FakeTools({"r": "bytes"}))]).call(
+            "r", {})
         self.assertEqual(out["result"], "bytes")
         self.assertEqual(out["cost_nano"], 0)
         receipts = self.receipts.read_all()
@@ -58,15 +64,16 @@ class ToolWrapperTests(unittest.TestCase):
         self.assertEqual(self.receipts.verify(), 2)
 
     def test_backend_cost_settles_through_ledger(self):
-        out = self.wrap(CostlyBackend(300)).call("w", {}, "WRITE",
-                                                 estimate_nano=500)
+        out = self.wrap([("w", "WRITE", 500, CostlyBackend(300))]).call(
+            "w", {})
         self.assertEqual(out["cost_nano"], 300)
         self.assertEqual(self.ledger.spend("t1")["settled_nano"], 300)
         self.assertEqual(self.ledger.totals()["inflight_nano"], 0)
 
     def test_experimental_write_is_denied_and_receipted(self):
         with self.assertRaises(ToolDenied) as ctx:
-            self.wrap(FakeTools(), stage="experimental").call("w", {}, "WRITE")
+            self.wrap([("w", "WRITE", 0, FakeTools())],
+                      stage="experimental").call("w", {})
         self.assertEqual(ctx.exception.code, "POLICY_DENIED")
         receipts = self.receipts.read_all()
         self.assertEqual(len(receipts), 1)
@@ -74,22 +81,23 @@ class ToolWrapperTests(unittest.TestCase):
         self.assertEqual(self.ledger.totals()["settled_nano"], 0)
 
     def test_gated_write_needs_approval_first(self):
-        wrapper = self.wrap(FakeTools({"w": "v"}), stage="gated")
+        wrapper = self.wrap([("w", "WRITE", 0, FakeTools({"w": "v"}))],
+                            stage="gated")
         with self.assertRaises(NeedsApproval) as req:
-            wrapper.call("w", {}, "WRITE")
+            wrapper.call("w", {})
         self.assertEqual(req.exception.request["action_class"], "WRITE")
         receipts = self.receipts.read_all()
         self.assertEqual(receipts[0]["action"], "approval_requested")
-        out = wrapper.call("w", {}, "WRITE", approved=True)
+        out = wrapper.call("w", {}, approved=True)
         self.assertEqual(out["result"], "v")
 
     def test_cap_breach_is_refused_before_any_call(self):
         backend = CostlyBackend(300)
-        wrapper = self.wrap(backend)
-        wrapper.call("w", {}, "WRITE", estimate_nano=10_000)
-        # First call settled to actual 300; 9,701 more would breach 10,000.
+        wrapper = self.wrap([("w", "WRITE", 10_000, backend)])
+        wrapper.call("w", {})
+        # First call settled to actual 300; a second 10,000 breaches the cap.
         with self.assertRaises(LedgerError) as ctx:
-            wrapper.call("w", {}, "WRITE", estimate_nano=9_701)
+            wrapper.call("w", {})
         self.assertEqual(ctx.exception.code, "CAP_EXCEEDED")
         self.assertEqual(len(backend.calls), 1)
         denials = [r for r in self.receipts.read_all()
@@ -99,11 +107,31 @@ class ToolWrapperTests(unittest.TestCase):
 
     def test_backend_failure_settles_failed_and_reraises(self):
         with self.assertRaises(ToolFailed) as ctx:
-            self.wrap(FailingBackend()).call("f", {}, "READ")
+            self.wrap([("f", "READ", 0, FailingBackend())]).call("f", {})
         self.assertEqual(ctx.exception.seq, 1)
         receipts = self.receipts.read_all()
         self.assertEqual(receipts[1]["outcome"], "failed")
         self.assertEqual(self.receipts.verify(), 2)
+
+    def test_unknown_tool_is_refused_and_receipted(self):
+        wrapper = self.wrap([("r", "READ", 0, FakeTools({"r": "v"}))])
+        with self.assertRaises(ToolDenied) as ctx:
+            wrapper.call("ghost", {})
+        self.assertEqual(ctx.exception.code, "UNKNOWN_TOOL")
+        receipts = self.receipts.read_all()
+        self.assertEqual(receipts[0]["action"], "denied")
+
+    def test_bad_tool_definition_is_refused(self):
+        registry = ToolRegistry()
+        with self.assertRaises(ToolDenied):
+            registry.register("t", "DELETE", 0, FakeTools())
+        with self.assertRaises(ToolDenied):
+            registry.register("t", "READ", -1, FakeTools())
+        with self.assertRaises(ToolDenied):
+            registry.register("t", "READ", 0, object())
+        registry.register("t", "READ", 0, FakeTools())
+        with self.assertRaises(ToolDenied):
+            registry.register("t", "READ", 0, FakeTools())
 
 
 if __name__ == "__main__":
