@@ -86,6 +86,25 @@ def tree_commit(tree: Path) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def repo_state(repo: Path) -> tuple[str | None, bool]:
+    """(HEAD commit, tracked tree dirty). Dirty counts only tracked files:
+    untracked eval outputs never block a run."""
+    try:
+        head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=15)
+        diff = subprocess.run(["git", "-C", str(repo), "diff", "--quiet"],
+                              capture_output=True, timeout=15)
+        staged = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--cached", "--quiet"],
+            capture_output=True, timeout=15)
+    except Exception:
+        return None, True
+    if head.returncode != 0:
+        return None, True
+    dirty = diff.returncode != 0 or staged.returncode != 0
+    return head.stdout.strip(), dirty
+
+
 def line_contains(tree: Path, path: str, lineno: int, text: str) -> bool:
     try:
         lines = (tree / path).read_text(encoding="utf-8").splitlines()
@@ -255,13 +274,22 @@ def main(argv=None) -> int:
         print(f"refusing to run: tree is at {got}, eval is frozen at"
               f" {frozen}")
         return 2
+    repo = CASES_PATH.parent.parent
+    head, dirty = repo_state(repo)
+    if head is None or dirty:
+        print("refusing to run: runner tree is unknown or has uncommitted"
+              " tracked changes; commit or stash first")
+        return 2
+    print(f"runner: {head}")
+    report_head = head
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     eval_dir = out_path.parent / "code-qa-v1"
     eval_dir.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(eval_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
                     daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
-    report: dict = {"set": "code-qa.v1", "runs": args.runs, "cases": {}}
+    report: dict = {"set": "code-qa.v1", "runs": args.runs,
+                    "runner_commit": report_head, "cases": {}}
     for case in cases:
         passes = 0
         details = []
