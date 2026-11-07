@@ -55,6 +55,13 @@ class Memory:
     def close(self) -> None:
         self.db.close()
 
+    def check_source(self, source: dict) -> str | None:
+        """Return None if the pointer resolves, else a reason string.
+
+        Public so the tool-less critic can reuse the exact write-time check.
+        """
+        return self._resolve(source)
+
     def _resolve(self, source: dict) -> str | None:
         """Return None if the pointer resolves, else a reason string."""
         kind = source.get("kind")

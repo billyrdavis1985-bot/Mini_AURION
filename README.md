@@ -8,7 +8,8 @@ Network): an orchestrated multi-LLM system for real-world problems. This repo
 is the lighter build-and-test version. If it works, it helps build the full
 system.
 
-**Status: Milestone 0** — scaffold + governance core. No agents yet.
+**Status: Milestone 1** — agent loop (orchestrator, specialist, critic)
+proven on fixtures. No live model calls yet.
 
 ## Rules
 
@@ -36,6 +37,11 @@ No API key, no network, no spend. All Milestone 0 tests run on fixtures.
 | `mini_aurion/ledger.py` | spend reservations, caps, settlement |
 | `mini_aurion/policy.py` | deterministic action gate (reads free, writes gated) |
 | `mini_aurion/memory.py` | provenance-tracked notes, write-time evidence checks |
+| `mini_aurion/messages.py` | typed inter-agent claims with cited evidence |
+| `mini_aurion/tools.py` | trust wrapper: gate + receipts + ledger per call |
+| `mini_aurion/specialist.py` | bounded tool-loop investigator, escalates honestly |
+| `mini_aurion/critic.py` | tool-less citation verifier, scored on catches |
+| `mini_aurion/orchestrator.py` | hub-spoke runner: delegate, verify, retry, synthesize |
 | `mini_aurion/fixture.py` | scripted fake model + tools for $0 tests |
 | `tests/` | suite over disposable state |
 | `OPERATIONS.md` | operating constitution |
