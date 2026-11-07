@@ -105,6 +105,30 @@ def repo_state(repo: Path) -> tuple[str | None, bool]:
     return head.stdout.strip(), dirty
 
 
+def tree_clean(tree: Path) -> bool:
+    """The eval tree must be exactly the frozen commit. Tracked edits shift
+    graded line numbers; untracked files are visible to the model, and a
+    stray answer key would invalidate every score."""
+    try:
+        done = subprocess.run(["git", "-C", str(tree), "status",
+                               "--porcelain"], capture_output=True, text=True,
+                              timeout=15)
+    except Exception:
+        return False
+    return done.returncode == 0 and not done.stdout.strip()
+
+
+def out_inside_tree(out: Path, tree: Path) -> bool:
+    """Refuse --out inside --tree: earlier runs' output would sit in the
+    tree the next run's model reads."""
+    try:
+        out_r = out.resolve()
+        tree_r = tree.resolve()
+    except Exception:
+        return True
+    return out_r == tree_r or tree_r in out_r.parents
+
+
 def line_contains(tree: Path, path: str, lineno: int, text: str) -> bool:
     try:
         lines = (tree / path).read_text(encoding="utf-8").splitlines()
@@ -275,6 +299,14 @@ def main(argv=None) -> int:
         print(f"refusing to run: tree is at {got}, eval is frozen at"
               f" {frozen}")
         return 2
+    out_path = Path(args.out)
+    if not tree_clean(tree):
+        print("refusing to run: eval tree has uncommitted or untracked"
+              " files; restore the frozen tree first")
+        return 2
+    if out_inside_tree(out_path, tree):
+        print("refusing to run: --out must be outside --tree")
+        return 2
     repo = CASES_PATH.parent.parent
     head, dirty = repo_state(repo)
     if head is None or dirty:
@@ -283,7 +315,6 @@ def main(argv=None) -> int:
         return 2
     print(f"runner: {head}")
     report_head = head
-    out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     eval_dir = out_path.parent / "code-qa-v1"
     eval_dir.mkdir(parents=True, exist_ok=True)

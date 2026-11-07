@@ -8,7 +8,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval.grade_code_qa import TreeReader, grade, repo_state  # noqa: E402
+from eval.grade_code_qa import (TreeReader, grade, out_inside_tree,  # noqa: E402
+                                   repo_state, tree_clean)
 
 CASES = {c["id"]: c for c in json.loads(
     (Path(__file__).resolve().parent.parent / "eval" / "code_qa_v1.json")
@@ -160,6 +161,36 @@ class GraderTests(unittest.TestCase):
         run("checkout", "-q", "--", "f.txt")
         _, dirty = repo_state(repo)
         self.assertFalse(dirty)
+
+    def test_tree_clean_rejects_edits_and_untracked(self):
+        import shutil
+        import subprocess
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        repo = Path(self.tmp.name) / "repo"
+        repo.mkdir()
+        run = lambda *a: subprocess.run(
+            ["git", "-C", str(repo), *a], capture_output=True, text=True,
+            timeout=15)
+        run("init", "-q")
+        run("config", "user.email", "t@t.t")
+        run("config", "user.name", "t")
+        (repo / "tools.py").write_text("v1")
+        run("add", "tools.py")
+        run("commit", "-qm", "one")
+        self.assertTrue(tree_clean(repo))
+        (repo / "tools.py").write_text("v2")
+        self.assertFalse(tree_clean(repo))
+        run("checkout", "-q", "--", "tools.py")
+        (repo / "code_qa_v1.json").write_text("{}")
+        self.assertFalse(tree_clean(repo))
+
+    def test_out_inside_tree(self):
+        tree = Path(self.tmp.name) / "tree"
+        self.assertTrue(out_inside_tree(tree / "o.json", tree))
+        self.assertTrue(out_inside_tree(tree, tree))
+        self.assertFalse(out_inside_tree(Path(self.tmp.name) / "o.json",
+                                         tree))
 
     def test_cases_file_is_frozen(self):
         frozen = json.loads(
