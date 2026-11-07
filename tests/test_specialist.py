@@ -5,7 +5,7 @@ import unittest
 from mini_aurion.fixture import ESCALATE_TEXT, FakeModel, FakeTools
 from mini_aurion.ledger import Ledger
 from mini_aurion.receipts import ReceiptStore
-from mini_aurion.specialist import Specialist
+from mini_aurion.specialist import MAX_TOOL_CHARS, Specialist
 from mini_aurion.tools import ToolRegistry, ToolWrapper
 
 CAPS = {"task_cap_nano": 10_000, "daily_cap_nano": 50_000,
@@ -38,6 +38,22 @@ class SpecialistTests(unittest.TestCase):
                           model_estimate_nano=estimate, **kw)
         return spec.investigate("t1", brief)
 
+    def _wired(self, script, tools_dict, **kw):
+        """(Specialist, FakeModel) pair, exposing the model for assertions
+        on what it was shown."""
+        backend = FakeTools(tools_dict)
+        registry = ToolRegistry()
+        for name in tools_dict:
+            registry.register(name, "READ", 0, backend)
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="trusted", task_id="t1",
+                            agent_id="spec")
+        model = FakeModel(script)
+        estimate = kw.pop("model_estimate_nano", 0)
+        spec = Specialist("spec", model, tools,
+                          model_estimate_nano=estimate, **kw)
+        return spec, model
+
     def test_tool_loop_builds_evidenced_message(self):
         msg = self.investigate_with(
             [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]},
@@ -54,21 +70,36 @@ class SpecialistTests(unittest.TestCase):
         self.assertIn("tool_call", kinds)
 
     def test_low_budget_warns_model_before_final_calls(self):
-        backend = FakeTools({"read": "bytes"})
-        registry = ToolRegistry()
-        registry.register("read", "READ", 0, backend)
-        tools = ToolWrapper(registry, receipts=self.receipts,
-                            ledger=self.ledger, stage="trusted", task_id="t1",
-                            agent_id="spec")
-        model = FakeModel(
+        spec, model = self._wired(
             [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]},
-             {"text": "done", "evidence": [], "confidence": 0.5}])
-        spec = Specialist("spec", model, tools, model_estimate_nano=0,
-                          max_model_calls=2, max_tool_calls=8)
+             {"text": "done", "evidence": [], "confidence": 0.5}],
+            {"read": "bytes"}, max_model_calls=2, max_tool_calls=8)
         msg = spec.investigate("t1", "brief")
         self.assertFalse(msg.escalated)
         roles = [m.get("role") for m in model.seen[1]]
         self.assertIn("budget", roles)
+
+    def test_long_tool_result_is_capped_and_marked(self):
+        spec, model = self._wired(
+            [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]},
+             {"text": "done", "evidence": [], "confidence": 0.5}],
+            {"read": "x" * (MAX_TOOL_CHARS + 5)})
+        spec.investigate("t1", "brief")
+        results = [m for m in model.seen[1]
+                   if m.get("role") == "tool_result"]
+        self.assertEqual(len(results), 1)
+        self.assertIn("[truncated: showing", results[0]["text"])
+        self.assertTrue(results[0]["text"].startswith("x" * 100))
+
+    def test_short_tool_result_passes_through_unmarked(self):
+        spec, model = self._wired(
+            [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]},
+             {"text": "done", "evidence": [], "confidence": 0.5}],
+            {"read": "bytes"})
+        spec.investigate("t1", "brief")
+        results = [m for m in model.seen[1]
+                   if m.get("role") == "tool_result"]
+        self.assertEqual(results[0]["text"], "bytes")
 
     def test_model_saying_cannot_verify_escalates(self):
         msg = self.investigate_with([{"text": ESCALATE_TEXT}])

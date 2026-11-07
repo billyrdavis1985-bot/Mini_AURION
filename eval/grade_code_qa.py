@@ -62,7 +62,10 @@ class TreeReader:
         return target
 
     def _read(self, path: str) -> str:
-        return self._confine(path).read_text(encoding="utf-8")
+        # Numbered: path:line cites are unguessable without visible numbers.
+        text = self._confine(path).read_text(encoding="utf-8")
+        return "\n".join(f"{n}: {line}"
+                         for n, line in enumerate(text.splitlines(), 1))
 
     def _list(self, path: str) -> str:
         target = self._confine(path)

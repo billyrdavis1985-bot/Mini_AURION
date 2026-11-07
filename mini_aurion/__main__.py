@@ -38,8 +38,10 @@ class CorpusReader:
                                     for p in target.iterdir()))
         if name != "read_file":
             raise KeyError(f"unknown tool {name!r}")
-        return self._confine(str(args.get("path", ""))).read_text(
+        text = self._confine(str(args.get("path", ""))).read_text(
             encoding="utf-8")
+        return "\n".join(f"{n}: {line}"
+                         for n, line in enumerate(text.splitlines(), 1))
 
     def _confine(self, path: str):
         target = (self.root / path).resolve()
