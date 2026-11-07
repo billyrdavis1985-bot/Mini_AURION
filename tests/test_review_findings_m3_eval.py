@@ -89,7 +89,6 @@ class _DownModel:
 
 class FailuresScoreAsEscalations(_Harness):
 
-    @unittest.expectedFailure
     def test_H1_a_transport_error_is_not_a_pass_on_the_unanswerable_case(self):
         """Orchestrator.run turns any exception into status 'escalated' with
         text 'CANNOT_VERIFY: orchestrator error: ...'. grade_unanswerable
@@ -111,7 +110,6 @@ class FailuresScoreAsEscalations(_Harness):
         ok, _ = grade(CASES["qa-newsletter"], result, self.tree)
         self.assertFalse(ok, "an HTTP 401 graded as a correct escalation")
 
-    @unittest.expectedFailure
     def test_H1_a_spend_cap_refusal_is_not_a_pass_on_the_unanswerable_case(self):
         """Same path, different trigger. qa-newsletter is the last case in
         code_qa_v1.json, so if --cap-usd runs out mid-eval every remaining

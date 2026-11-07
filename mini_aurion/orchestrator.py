@@ -67,7 +67,7 @@ class Orchestrator:
             return {"task_id": task_id, "status": "escalated",
                     "text": f"CANNOT_VERIFY: orchestrator error: {exc}"[:300],
                     "evidence": [], "cost_nano": 0, "findings": [],
-                    "unattempted": []}
+                    "unattempted": [], "cause": "error"}
 
     def _run_inner(self, task_id: str, question: str) -> dict:
         try:
@@ -76,7 +76,7 @@ class Orchestrator:
         except _ModelRefused as exc:
             return self._finish(task_id, [], [], "escalated",
                                 f"CANNOT_VERIFY: plan refused: {exc}"[:300],
-                                [], f"plan refused: {exc}")
+                                [], f"plan refused: {exc}", cause="cap")
         subtasks = plan.get("subtasks", []) or [
             {"id": "s1", "brief": question,
              "specialist": next(iter(self.specialists), "none")}]
@@ -130,8 +130,8 @@ class Orchestrator:
                             fallback, evidence, synth_note)
 
     def _finish(self, task_id: str, findings: list, unattempted: list,
-                status: str, text: str, evidence: list,
-                note: str) -> dict:
+                status: str, text: str, evidence: list, note: str,
+                cause: str = "model") -> dict:
         cost_nano = (sum(f["message"].cost_nano for f in findings)
                      + self._model_spend)
         detail: dict = {"status": status,
@@ -145,7 +145,8 @@ class Orchestrator:
                              outcome="ok" if status == "complete" else status)
         return {"task_id": task_id, "status": status, "text": text,
                 "evidence": evidence, "cost_nano": cost_nano,
-                "findings": findings, "unattempted": unattempted}
+                "findings": findings, "unattempted": unattempted,
+                "cause": cause}
 
     def _delegate(self, task_id: str, sub: dict) -> dict:
         name = sub.get("specialist", next(iter(self.specialists), "none"))
