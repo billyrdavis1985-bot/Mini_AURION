@@ -65,6 +65,7 @@ class OrchestratorTests(unittest.TestCase):
                            receipts=self.receipts,
                            ledger=self.ledger, message_budget=budget,
                            model_estimate_nano=0)
+        self.last_orc_model = orc_model
         return orc
 
     def test_happy_path_completes_with_combined_evidence(self):
@@ -83,6 +84,16 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIn("task_start", actions)
         self.assertIn("task_end", actions)
         self.assertEqual(actions.count("delegate"), 2)
+
+    def test_synthesis_sees_the_question(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]})
+        orc.run("t1", "question?")
+        synth_input = self.last_orc_model.seen[1]
+        self.assertTrue(any(m.get("role") == "question"
+                            and "question?" in m["text"]
+                            for m in synth_input))
 
     def test_critic_verdicts_are_receipted_with_claims(self):
         orc = self.build(

@@ -94,9 +94,12 @@ class Orchestrator:
             return self._finish(task_id, findings, unattempted, "escalated",
                                 "CANNOT_VERIFY: no accepted findings", [], "")
         try:
+            # Synthesis sees the question, not just the claims: without it
+            # the summary drifts and the critic usually sends it to fallback.
             synthesis = self._complete(
-                task_id, [{"role": f["subtask"],
-                           "text": f["message"].claim} for f in accepted])
+                task_id, [{"role": "question", "text": question}] +
+                [{"role": f["subtask"], "text": f["message"].claim}
+                 for f in accepted])
         except _ModelRefused as exc:
             synthesis = None
             synth_note = f"synthesis refused: {exc}"
