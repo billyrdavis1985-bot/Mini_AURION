@@ -130,6 +130,11 @@ class GraderTests(unittest.TestCase):
         with self.assertRaises(NotADirectoryError):
             reader.call("list_dir", {"path": "OPERATIONS.md"})
 
+    def test_layout_lists_top_level(self):
+        reader = TreeReader(self.tree)
+        self.assertEqual(reader.layout().splitlines(),
+                         ["OPERATIONS.md", "mini_aurion/"])
+
     def test_read_file_numbers_lines(self):
         reader = TreeReader(self.tree)
         out = reader.call("read_file", {"path": "mini_aurion/tools.py"})
