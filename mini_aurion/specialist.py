@@ -37,6 +37,7 @@ class Specialist:
         self.model_estimate_nano = model_estimate_nano
 
     def investigate(self, task_id: str, brief: str) -> AgentMessage:
+        self.tools.clear_cache()
         messages = [{"role": "brief", "text": brief}]
         tool_calls_made = 0
         cost_nano = 0

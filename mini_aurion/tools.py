@@ -145,18 +145,22 @@ class ToolWrapper:
                                  action="approval_requested", tool=name,
                                  detail=request, outcome="ok")
             raise NeedsApproval(request)
-        # Exact repeats are served from cache: free, receipted, and marked,
-        # so a model stuck re-listing a directory pays no budget for it.
-        key = self._key(name, args)
+        # Exact READ repeats are served from cache: free, receipted, and
+        # marked, so a model stuck re-listing a directory pays no budget
+        # for it. Only READs: a repeated WRITE must run again (its receipt
+        # settles from a real return code), and an approval must never be
+        # silently swallowed. The hit is a pointer, not the content again:
+        # the full result is already above in this investigation.
+        key = self._key(name, args) if action_class == "READ" else None
         if key is not None and key in self._results:
             begun = self.receipts.begin(
                 agent_id=self.agent_id, task_id=self.task_id,
                 action="tool_call", tool=name,
                 detail={"args": dict(args), "cached": True})
             self.receipts.settle(begun["seq"], 0, cost_nano=0)
-            return {"result": str(self._results[key])
-                    + "\n[duplicate: you already requested exactly this;"
-                      " no new information]",
+            return {"result": "[duplicate: this exact call already returned"
+                              " above in full; use that content — no new"
+                              " call was made]",
                     "seq": begun["seq"], "cost_nano": 0, "duplicate": True}
         reservation = None
         if estimate_nano > 0:
@@ -191,7 +195,16 @@ class ToolWrapper:
         self.receipts.settle(begun["seq"], return_code, cost_nano=actual)
         if return_code != 0:
             raise ToolFailed(begun["seq"], error)
-        if key is not None:
-            self._results[key] = result
+        if action_class == "READ":
+            if key is not None:
+                self._results[key] = result
+        else:
+            self._results.clear()
         return {"result": result, "seq": begun["seq"], "cost_nano": actual,
                 "duplicate": False}
+
+    def clear_cache(self) -> None:
+        """Drop cached results. The specialist calls this per investigation
+        pass, so a retry's 'duplicate' notice can never claim content its
+        fresh context does not hold."""
+        self._results.clear()
