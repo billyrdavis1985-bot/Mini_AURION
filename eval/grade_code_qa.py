@@ -246,6 +246,13 @@ def _fresh_dir(path: Path) -> Path:
     return path.parent / f"{path.name}-a{n}"
 
 
+def eval_ledger_path(eval_dir: Path) -> Path:
+    """One ledger per eval invocation. The cap budgets a single experiment;
+    reusing the ledger would stack every past batch against it until the
+    cap locks out all runs (measured: $3.75 history vs a $3.00 cap)."""
+    return _fresh_dir(eval_dir / "ledger.sqlite3")
+
+
 def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger) -> dict:
     state_dir = _fresh_dir(state_dir)
@@ -340,7 +347,7 @@ def main(argv=None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     eval_dir = out_path.parent / "code-qa-v1"
     eval_dir.mkdir(parents=True, exist_ok=True)
-    ledger = Ledger(eval_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
+    ledger = Ledger(eval_ledger_path(eval_dir), task_cap_nano=cap_nano,
                     daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
     report: dict = {"set": "code-qa.v1", "runs": args.runs,
                     "runner_commit": report_head, "cases": {}}
