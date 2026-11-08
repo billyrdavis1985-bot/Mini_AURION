@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 
+from mini_aurion.contract import Criterion, TaskContract
 from mini_aurion.critic import Critic
 from mini_aurion.fixture import FakeModel, FakeTools
 from mini_aurion.ledger import Ledger
@@ -25,6 +26,13 @@ def answer(text, evidence=None):
             "confidence": 0.9}
 
 
+def contract(ids=("A1", "A2")):
+    return TaskContract(contract_id="t", version=1, goal="g",
+                        deliverable="d",
+                        acceptance=tuple(Criterion(i, "mechanical", i)
+                                         for i in ids))
+
+
 class OrchestratorTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="ma-orc-")
@@ -43,7 +51,8 @@ class OrchestratorTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def build(self, plan_reply, spec_scripts, synth_text="done",
-              budget=10, synth_evidence=None):
+              budget=10, synth_evidence=None, contract=None,
+              acceptance=(), planner_prompt=None):
         synth = {"text": synth_text,
                  "evidence": synth_evidence
                  if synth_evidence is not None else GOOD_EVIDENCE}
@@ -64,7 +73,9 @@ class OrchestratorTests(unittest.TestCase):
                                   receipts=self.receipts),
                            receipts=self.receipts,
                            ledger=self.ledger, message_budget=budget,
-                           model_estimate_nano=0)
+                           model_estimate_nano=0, contract=contract,
+                           acceptance=acceptance,
+                           planner_prompt=planner_prompt)
         self.last_orc_model = orc_model
         return orc
 
@@ -84,6 +95,86 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIn("task_start", actions)
         self.assertIn("task_end", actions)
         self.assertEqual(actions.count("delegate"), 2)
+
+    def test_untagged_subtask_is_refused(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]}, contract=contract())
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["status"], "escalated")
+        self.assertEqual(result["findings"][0]["status"], "refused")
+        denied = [r for r in self.receipts.read_all()
+                  if r["action"] == "delegate" and r["outcome"] == "denied"]
+        self.assertEqual(len(denied), 1)
+
+    def test_unknown_criterion_is_refused(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["AX"]}),
+            {"alpha": [answer("A")]}, contract=contract())
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["findings"][0]["status"], "refused")
+        self.assertIn("AX", result["findings"][0]["reason"])
+
+    def test_tagged_subtask_runs(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract())
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["findings"][0]["status"], "accepted")
+
+    def test_garbage_plan_falls_back_to_default(self):
+        orc = self.build({"text": "plan"},
+                         {"alpha": [answer("A")]}, contract=contract())
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["findings"][0]["subtask"], "s1")
+
+    def test_all_refused_does_not_fall_back(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]}, contract=contract())
+        result = orc.run("t1", "question?")
+        self.assertEqual(
+            [f["status"] for f in result["findings"]], ["refused"])
+
+    def test_planner_receives_prompt_and_contract(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract(),
+            planner_prompt="PLAN")
+        orc.run("t1", "question?")
+        self.assertEqual(self.last_orc_model.systems[0], "PLAN")
+        roles = [m.get("role") for m in self.last_orc_model.seen[0]]
+        self.assertIn("contract", roles)
+        text = " ".join(m.get("text", "")
+                        for m in self.last_orc_model.seen[0])
+        self.assertIn("A1", text)
+        start = [r for r in self.receipts.read_all()
+                 if r["action"] == "task_start"][0]
+        self.assertTrue(start["detail"]["contract"].startswith("sha256:"))
+
+    def test_failed_acceptance_downgrades_to_partial(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]},
+            acceptance=(("A1", lambda cand: False),))
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["status"], "partial")
+        end = [r for r in self.receipts.read_all()
+               if r["action"] == "task_end"][-1]
+        self.assertEqual(end["detail"]["acceptance"], {"A1": False})
+        self.assertIn("A1", end["detail"]["note"])
+
+    def test_passing_acceptance_keeps_complete(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]},
+            acceptance=(("A1", lambda cand: True),))
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["status"], "complete")
 
     def test_synthesis_sees_the_question(self):
         orc = self.build(

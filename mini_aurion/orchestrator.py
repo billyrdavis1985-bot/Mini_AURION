@@ -8,6 +8,7 @@ chatter is capped by a message budget.
 """
 from __future__ import annotations
 
+from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
 from .messages import AgentMessage
 
@@ -19,9 +20,14 @@ class _ModelRefused(Exception):
 class Orchestrator:
     def __init__(self, agent_id: str, model, specialists: dict,
                  critic, *, receipts, ledger, message_budget: int = 10,
-                 model_estimate_nano: int):
+                 model_estimate_nano: int,
+                 contract: TaskContract | None = None,
+                 acceptance: tuple = (),
+                 planner_prompt: str | None = None):
         """model_estimate_nano is required: 0 asserts the builder knows the
-        model is free. Metering is never silently off."""
+        model is free. Metering is never silently off. With a contract, the
+        plan is validated against its criteria and completion requires every
+        acceptance check; acceptance holds (criterion id, checker) pairs."""
         if not isinstance(model_estimate_nano, int) or model_estimate_nano < 0:
             raise ValueError("model_estimate_nano must be a non-negative int")
         self.agent_id = agent_id
@@ -32,9 +38,13 @@ class Orchestrator:
         self.ledger = ledger
         self.message_budget = message_budget
         self.model_estimate_nano = model_estimate_nano
+        self.contract = contract
+        self.acceptance = tuple(acceptance)
+        self.planner_prompt = planner_prompt
         self.messages_used = 0
 
-    def _complete(self, task_id: str, messages: list) -> dict:
+    def _complete(self, task_id: str, messages: list,
+                  system: str | None = None) -> dict:
         reservation = None
         if self.model_estimate_nano > 0:
             try:
@@ -42,7 +52,11 @@ class Orchestrator:
                                                   self.model_estimate_nano)
             except LedgerError as exc:
                 raise _ModelRefused(str(exc)) from exc
-        reply = self.model.complete(messages, tools=[])
+        if system is None:
+            reply = self.model.complete(messages, tools=[])
+        else:
+            reply = self.model.complete(messages, tools=[],
+                                        system_prompt=system)
         if reservation is not None:
             actual = getattr(self.model, "last_cost_nano", 0) or 0
             self.ledger.settle(reservation, actual)
@@ -50,9 +64,12 @@ class Orchestrator:
 
     def run(self, task_id: str, question: str) -> dict:
         self.messages_used = 0
+        start_detail: dict = {"question": question[:500]}
+        if self.contract is not None:
+            start_detail["contract"] = contract_hash(self.contract)
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
-                             action="task_start",
-                             detail={"question": question[:500]}, outcome="ok")
+                             action="task_start", detail=start_detail,
+                             outcome="ok")
         try:
             return self._run_inner(task_id, question)
         except Exception as exc:  # noqa: BLE001 - every task ends with task_end
@@ -71,17 +88,23 @@ class Orchestrator:
                     "unattempted": [], "cause": "error"}
 
     def _run_inner(self, task_id: str, question: str) -> dict:
+        plan_messages = [{"role": "question", "text": question}]
+        system = None
+        if self.contract is not None:
+            plan_messages.append(
+                {"role": "contract",
+                 "text": render_for_planner(self.contract,
+                                            sorted(self.specialists))})
+            system = self.planner_prompt
         try:
-            plan = self._complete(task_id, [{"role": "question",
-                                             "text": question}])
+            plan = self._complete(task_id, plan_messages, system=system)
         except _ModelRefused as exc:
             return self._finish(task_id, [], [], "escalated",
                                 f"CANNOT_VERIFY: plan refused: {exc}"[:300],
                                 [], f"plan refused: {exc}", cause="cap")
-        subtasks = plan.get("subtasks", []) or [
-            {"id": "s1", "brief": question,
-             "specialist": next(iter(self.specialists), "none")}]
-        findings: list[dict] = []
+        subtasks, refused = self._validate_plan(
+            task_id, plan.get("subtasks", []), question)
+        findings: list[dict] = refused
         unattempted: list[str] = []
         for sub in subtasks:
             if self.messages_used >= self.message_budget:
@@ -141,10 +164,24 @@ class Orchestrator:
         # The ledger is the cost signal: summing messages drops every failed
         # attempt the retry replaced.
         cost_nano = self.ledger.spend(task_id)["settled_nano"]
+        candidate = {"status": status, "text": text, "evidence": evidence,
+                     "findings": findings, "unattempted": unattempted}
+        results = {}
+        for cid, checker in self.acceptance:
+            try:
+                results[cid] = bool(checker(candidate))
+            except Exception:
+                results[cid] = False
+        failed = [cid for cid, ok in results.items() if not ok]
+        if status == "complete" and failed:
+            status = "partial"
+            note = ((note + "; ") if note else ""
+                    + "acceptance failed: " + ",".join(failed))
         detail: dict = {"status": status,
                         "accepted": [f["subtask"] for f in findings
                                      if f["status"] == "accepted"],
-                        "unattempted": unattempted}
+                        "unattempted": unattempted,
+                        "acceptance": results}
         if note:
             detail["note"] = note
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
@@ -154,6 +191,50 @@ class Orchestrator:
                 "evidence": evidence, "cost_nano": cost_nano,
                 "findings": findings, "unattempted": unattempted,
                 "cause": cause}
+
+    def _validate_plan(self, task_id: str, raw, question: str):
+        """Split the planner's output into runnable subtasks and refusals.
+        Under a contract every subtask names known criterion ids, or it is
+        refused with a receipt. A structurally unusable plan falls back to
+        the single default subtask; all-refused does not (that would dodge
+        the refusal)."""
+        default = {"id": "s1", "brief": question,
+                   "specialist": next(iter(self.specialists), "none")}
+        if self.contract is None:
+            return (raw or [default]), []
+        if not isinstance(raw, list) or not raw:
+            default["criteria"] = sorted(self.contract.criterion_ids())
+            return [default], []
+        known = self.contract.criterion_ids()
+        runnable, refused = [], []
+        for sub in raw:
+            if not isinstance(sub, dict):
+                continue
+            sid = sub.get("id", "?")
+            claimed = sub.get("criteria", [])
+            unknown = [c for c in claimed if c not in known]
+            if not claimed or unknown:
+                reason = ("names no criterion" if not claimed
+                          else f"names unknown criteria {unknown}")
+                self.receipts.append(
+                    agent_id=self.agent_id, task_id=task_id,
+                    action="delegate",
+                    detail={"subtask": sid,
+                            "to": sub.get("specialist", "?"),
+                            "reason": reason},
+                    outcome="denied")
+                refused.append(
+                    {"subtask": sid, "status": "refused", "reason": reason,
+                     "message": AgentMessage(
+                         sender=self.agent_id, task_id=task_id,
+                         claim=f"refused: {reason}", cost_nano=0,
+                         escalated=True)})
+            else:
+                runnable.append(sub)
+        if not runnable and not refused:
+            default["criteria"] = sorted(known)
+            return [default], []
+        return runnable, refused
 
     def _delegate(self, task_id: str, sub: dict) -> dict:
         name = sub.get("specialist", next(iter(self.specialists), "none"))
