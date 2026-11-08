@@ -104,6 +104,10 @@ author agent, sources, verification status (`verified` / `unverified` /
 - Stability: repeat runs must agree within tolerance — **at least 4 of 5 runs
   agree per case** — or the capability drops a stage. **[code]** (measured) +
   **[review]** (demotion)
+- Only valid runs count: transport errors and spend-cap refusals never
+  reached the model, so they grade as invalid (neither pass nor fail), are
+  reported separately, and a case with fewer than 5 valid runs is undecided,
+  never stable. **[code]**
 
 ## 8. Tier rules
 
@@ -171,3 +175,5 @@ can evolve; the evolution is itself governed. **[review]**
   verifiers; promotion needs 50 reviewed actions + red-team pass; new hostile
   input section; stability tolerance 4/5; process-level kill + dead-man's
   switch; typo fix. Pending operator approval.
+- v0.3 (2026-11-07): stability counts valid runs only; error/cap runs are
+  invalid and reported separately. Approved by the operator.

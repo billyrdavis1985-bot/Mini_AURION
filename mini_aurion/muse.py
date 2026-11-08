@@ -26,6 +26,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+from .specialist import MAX_TOOL_CHARS
+
 API_KEY_ENV_VAR = "MODEL_API_KEY"
 BASE_URL_ENV_VAR = "MINI_AURION_MUSE_BASE_URL"
 MODEL_ENV_VAR = "MINI_AURION_MUSE_MODEL"
@@ -43,10 +45,11 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 NANO_PER_USD = 1_000_000_000
-# Per-message cap. Must cover the specialist's whole per-result cap, or
-# large reads arrive cut with no marker (measured live: an 11482-char file
-# lost its tail at 8000). Any cut here is marked, never silent.
-MAX_MESSAGE_CHARS = 12000
+# Per-message cap. Derived from the producer's cap, with headroom: the
+# specialist emits MAX_TOOL_CHARS plus its own marker, and an equal cap here
+# would cut that marker off and misreport the already-cut size as the file's
+# size. Any cut here is marked, never silent.
+MAX_MESSAGE_CHARS = MAX_TOOL_CHARS + 200
 
 PROMPT_VERSION = "m0.mini-aurion-investigator.v1"
 
@@ -249,10 +252,14 @@ class MuseModel:
         for call in message.get("tool_calls", []) or []:
             try:
                 function = call.get("function", {})
+                args = function.get("arguments", "{}") or "{}"
+                # Some servers send arguments as an object already; anything
+                # else unparseable skips the call, per the module rule.
+                if not isinstance(args, dict):
+                    args = json.loads(args)
                 tool_calls.append({"tool": str(function.get("name", "")),
-                                   "args": json.loads(
-                                       function.get("arguments", "{}") or "{}")})
-            except (ValueError, AttributeError):
+                                   "args": args})
+            except (ValueError, AttributeError, TypeError):
                 continue
         content = message.get("content") or ""
         if tool_calls:

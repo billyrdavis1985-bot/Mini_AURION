@@ -1,9 +1,8 @@
 """Reviewer findings from a full-repo pass at d1b489c, kept as
-expected-failure tests.
+regression tests.
 
-Each test fails today. When its fix lands, unittest reports "unexpected
-success" and CI fails until that test's marker is deleted; the test then
-stays as a regression guard, per the review-findings contract.
+All findings are fixed; markers were deleted with each fix, per the
+review-findings contract.
 
 H1 and H2 bear on the code-qa.v1 decision (>=4/5 per case): both can
 change a case's score for reasons that are not the model's.
@@ -89,7 +88,6 @@ class _DownModel:
 
 class FailuresScoreAsEscalations(_Harness):
 
-    @unittest.expectedFailure
     def test_H1_a_transport_error_is_not_a_pass_on_the_unanswerable_case(self):
         """Orchestrator.run turns any exception into status 'escalated' with
         text 'CANNOT_VERIFY: orchestrator error: ...'. grade_unanswerable
@@ -111,7 +109,6 @@ class FailuresScoreAsEscalations(_Harness):
         ok, _ = grade(CASES["qa-newsletter"], result, self.tree)
         self.assertFalse(ok, "an HTTP 401 graded as a correct escalation")
 
-    @unittest.expectedFailure
     def test_H1_a_spend_cap_refusal_is_not_a_pass_on_the_unanswerable_case(self):
         """Same path, different trigger. qa-newsletter is the last case in
         code_qa_v1.json, so if --cap-usd runs out mid-eval every remaining
@@ -129,7 +126,6 @@ class FailuresScoreAsEscalations(_Harness):
 
 class PartialPrefixEatsTheFirstBullet(_Harness):
 
-    @unittest.expectedFailure
     def test_H2_summary_survives_the_synthesis_fallback(self):
         """When synthesis is refused or fails the critic, the orchestrator
         returns 'PARTIAL: ' + the accepted claims. If the specialist's claim
@@ -192,7 +188,6 @@ class MalformedToolArguments(unittest.TestCase):
         self.led.close()
         self._tmp.cleanup()
 
-    @unittest.expectedFailure
     def test_H3_non_object_args_fail_the_call_not_the_task(self):
         """ToolWrapper.call does dict(args) while building the receipt. A
         model whose arguments decode to null, a string or a number (json
@@ -220,7 +215,6 @@ class MalformedToolArguments(unittest.TestCase):
                 self.assertGreater(len(self.receipts), before,
                                    "the attempt left no receipt")
 
-    @unittest.expectedFailure
     def test_H3_object_arguments_from_the_api_do_not_crash_the_adapter(self):
         """muse.py's own rule: unparseable answers become evidence-free
         replies. _to_reply catches ValueError and AttributeError around
@@ -242,7 +236,6 @@ class MalformedToolArguments(unittest.TestCase):
 
 class ReportedCostDropsRetries(_Harness):
 
-    @unittest.expectedFailure
     def test_H4_task_cost_matches_the_ledger_after_a_retry(self):
         """_delegate keeps only the retry's message, and _finish sums
         message.cost_nano, so the failed first attempt's spend vanishes from

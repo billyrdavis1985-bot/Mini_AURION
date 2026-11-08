@@ -210,7 +210,16 @@ def grade_unanswerable(claim: str, escalated: bool) -> tuple[bool, list[str]]:
     return False, ["answered instead of escalating"]
 
 
+INVALID_CAUSES = frozenset({"error", "cap"})
+
+
 def grade(case: dict, result: dict, tree: Path) -> tuple[bool, list[str]]:
+    # Transport errors and cap refusals never reached the model, so they
+    # grade as failures here and count as invalid (not model misses) in
+    # the report. Without this an outage PASSes the unanswerable case.
+    cause = result.get("cause", "model")
+    if cause in INVALID_CAUSES:
+        return False, [f"invalid run: {cause}"]
     escalated = result["status"] == "escalated"
     if case["type"] == "code":
         return grade_code(case, result["text"], result["evidence"],
@@ -329,21 +338,33 @@ def main(argv=None) -> int:
                     "runner_commit": report_head, "cases": {}}
     for case in cases:
         passes = 0
+        invalid = 0
         details = []
         for n in range(args.runs):
             task_id = f"{case['id']}-r{n + 1}"
             state = eval_dir / task_id
             result = run_live(case["question"], task_id, tree, state, ledger)
             ok, reasons = grade(case, result, tree)
+            valid = result.get("cause", "model") not in INVALID_CAUSES
             passes += ok
+            invalid += not valid
             details.append({"run": n + 1, "pass": ok, "reasons": reasons,
                             "status": result["status"],
+                            "valid": valid,
                             "text": result["text"][:1000],
                             "spent_nano": result.get("spent_nano", 0)})
-            print(f"{case['id']} run {n + 1}/{args.runs}:"
-                  f" {'PASS' if ok else 'FAIL ' + str(reasons)}")
+            if not valid:
+                print(f"{case['id']} run {n + 1}/{args.runs}:"
+                      f" INVALID {reasons}")
+            else:
+                print(f"{case['id']} run {n + 1}/{args.runs}:"
+                      f" {'PASS' if ok else 'FAIL ' + str(reasons)}")
+        # Stability needs 4 passes out of 5 valid runs; fewer than 5 valid
+        # leaves the case undecided, never stable.
+        stable = passes >= 4 and invalid == 0
         report["cases"][case["id"]] = {"passed": passes, "runs": args.runs,
-                                       "stable_4_of_5": passes >= 4,
+                                       "invalid": invalid,
+                                       "stable_4_of_5": stable,
                                        "details": details}
     totals = ledger.totals()
     ledger.close()

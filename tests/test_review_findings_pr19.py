@@ -1,8 +1,8 @@
-"""Reviewer finding on #19, kept as an expected-failure test.
+"""Reviewer finding on #19, kept as a regression test.
 
-When the fix lands this test passes, unittest reports "unexpected
-success", and CI fails until the marker is deleted. The test then stays
-as a regression guard, per the review-findings contract.
+Fixed: the adapter's cap derives from the specialist's with headroom, so
+the true-size marker survives. Marker deleted with the fix, per the
+review-findings contract.
 
 No network, no API key, $0.
 """
@@ -55,7 +55,6 @@ class SpecialistMarkerSurvivesAdapter(unittest.TestCase):
         self.assertEqual(len(results), 1)
         return results[0]
 
-    @unittest.expectedFailure
     def test_G3_specialist_truncation_marker_reaches_the_model(self):
         """#19 set muse.MAX_MESSAGE_CHARS = MAX_TOOL_CHARS (12000). The
         specialist emits 12000 chars *plus* its marker, so the adapter cuts

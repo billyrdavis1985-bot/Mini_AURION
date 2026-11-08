@@ -33,7 +33,6 @@ class Orchestrator:
         self.message_budget = message_budget
         self.model_estimate_nano = model_estimate_nano
         self.messages_used = 0
-        self._model_spend = 0
 
     def _complete(self, task_id: str, messages: list) -> dict:
         reservation = None
@@ -47,12 +46,10 @@ class Orchestrator:
         if reservation is not None:
             actual = getattr(self.model, "last_cost_nano", 0) or 0
             self.ledger.settle(reservation, actual)
-            self._model_spend += actual
         return reply
 
     def run(self, task_id: str, question: str) -> dict:
         self.messages_used = 0
-        self._model_spend = 0
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
                              action="task_start",
                              detail={"question": question[:500]}, outcome="ok")
@@ -64,10 +61,14 @@ class Orchestrator:
                 detail={"status": "escalated",
                         "error": f"{type(exc).__name__}: {exc}"[:300]},
                 outcome="escalated")
+            try:
+                cost_nano = self.ledger.spend(task_id)["settled_nano"]
+            except Exception:  # noqa: BLE001 - reporting never breaks the guard
+                cost_nano = 0
             return {"task_id": task_id, "status": "escalated",
                     "text": f"CANNOT_VERIFY: orchestrator error: {exc}"[:300],
-                    "evidence": [], "cost_nano": 0, "findings": [],
-                    "unattempted": []}
+                    "evidence": [], "cost_nano": cost_nano, "findings": [],
+                    "unattempted": [], "cause": "error"}
 
     def _run_inner(self, task_id: str, question: str) -> dict:
         try:
@@ -76,7 +77,7 @@ class Orchestrator:
         except _ModelRefused as exc:
             return self._finish(task_id, [], [], "escalated",
                                 f"CANNOT_VERIFY: plan refused: {exc}"[:300],
-                                [], f"plan refused: {exc}")
+                                [], f"plan refused: {exc}", cause="cap")
         subtasks = plan.get("subtasks", []) or [
             {"id": "s1", "brief": question,
              "specialist": next(iter(self.specialists), "none")}]
@@ -121,7 +122,9 @@ class Orchestrator:
             else:
                 synth_note = (f"synthesis failed critic:"
                               f" {check['catches']}")[:300]
-        fallback = "PARTIAL: " + "; ".join(
+        # The marker rides on its own line: glued onto the first claim line
+        # it eats a leading bullet ("PARTIAL: - ..." is not a bullet).
+        fallback = "PARTIAL:\n" + "; ".join(
             f["message"].claim for f in accepted)[:2000]
         evidence = []
         for finding in accepted:
@@ -130,10 +133,11 @@ class Orchestrator:
                             fallback, evidence, synth_note)
 
     def _finish(self, task_id: str, findings: list, unattempted: list,
-                status: str, text: str, evidence: list,
-                note: str) -> dict:
-        cost_nano = (sum(f["message"].cost_nano for f in findings)
-                     + self._model_spend)
+                status: str, text: str, evidence: list, note: str,
+                cause: str = "model") -> dict:
+        # The ledger is the cost signal: summing messages drops every failed
+        # attempt the retry replaced.
+        cost_nano = self.ledger.spend(task_id)["settled_nano"]
         detail: dict = {"status": status,
                         "accepted": [f["subtask"] for f in findings
                                      if f["status"] == "accepted"],
@@ -145,7 +149,8 @@ class Orchestrator:
                              outcome="ok" if status == "complete" else status)
         return {"task_id": task_id, "status": status, "text": text,
                 "evidence": evidence, "cost_nano": cost_nano,
-                "findings": findings, "unattempted": unattempted}
+                "findings": findings, "unattempted": unattempted,
+                "cause": cause}
 
     def _delegate(self, task_id: str, sub: dict) -> dict:
         name = sub.get("specialist", next(iter(self.specialists), "none"))

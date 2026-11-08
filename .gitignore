@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 var/
 .venv/
+eval/code-qa-v1/
+eval/results-*.json
