@@ -32,15 +32,17 @@ CAP = 10 ** 9
 class _Env(unittest.TestCase):
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory(prefix="ma-j-")
-        self.base = Path(self._tmp.name)
+        # Cleanups run last-in first-out, after the test: the directory is
+        # registered first so it goes last, once every SQLite handle a test
+        # opened (ledger here, memory in J2) is closed. Windows refuses to
+        # delete an open file.
+        tmp = tempfile.TemporaryDirectory(prefix="ma-j-")
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
         self.receipts = ReceiptStore(self.base / "r.jsonl")
         self.ledger = Ledger(self.base / "l.sqlite3", task_cap_nano=CAP,
                              daily_cap_nano=CAP, global_cap_nano=CAP)
-
-    def tearDown(self):
-        self.ledger.close()
-        self._tmp.cleanup()
+        self.addCleanup(self.ledger.close)
 
     def wrapper(self, tools, stage="trusted") -> ToolWrapper:
         registry = ToolRegistry()
