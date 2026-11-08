@@ -7,8 +7,8 @@ Live use (operator PC with MODEL_API_KEY):
 
 Grading is mechanical, no model judgment:
 - code: claim names the exact function; a path:line cite resolves into the
-  frozen tree and that line contains the expected text; must_mention strings
-  appear in the claim.
+  frozen tree and that line contains the expected text; must_mention words
+  appear in the claim (case, _/-/space insensitive).
 - summary: one bullet per rule; every bullet cites a distinct in-span line.
 - unanswerable: the run escalates with CANNOT_VERIFY.
 """
@@ -174,9 +174,17 @@ def grade_code(case: dict, claim: str, evidence: list, escalated: bool,
         reasons.append(f"no {expect['path']}:<line> cite containing"
                        f" {expect['line_contains']!r}")
     for word in expect.get("must_mention", []):
-        if word not in claim:
+        if not _mentions(claim, word):
             reasons.append(f"claim lacks {word!r}")
     return (not reasons), reasons
+
+
+def _mentions(claim: str, word: str) -> bool:
+    """A required word matches across case and _/-/space variants, so a
+    correct paraphrase ('return code') is not failed for missing the code
+    spelling ('return_code'). The words must still appear adjacently."""
+    norm = lambda s: s.casefold().replace("_", " ").replace("-", " ")
+    return norm(word) in norm(claim)
 
 
 def grade_summary(case: dict, text: str, evidence: list, escalated: bool,
