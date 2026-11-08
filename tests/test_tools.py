@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 
+from mini_aurion.contract import TaskContract
 from mini_aurion.fixture import FakeTools
 from mini_aurion.ledger import Ledger, LedgerError
 from mini_aurion.receipts import ReceiptStore
@@ -78,6 +79,28 @@ class ToolWrapperTests(unittest.TestCase):
         cached = [r for r in self.receipts.read_all()
                   if r["detail"].get("cached")]
         self.assertEqual(len(cached), 1)
+
+    def test_out_of_scope_call_is_denied(self):
+        scope = TaskContract(contract_id="t", version=1, goal="g",
+                             deliverable="d",
+                             in_scope_paths=("docs/",))
+        registry = ToolRegistry()
+        registry.register("read", "READ", 0, FakeTools({"read": "v"}))
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="trusted", task_id="t1",
+                            agent_id="spec", scope=scope)
+        out = tools.call("read", {"path": "docs/a.md"})
+        self.assertEqual(out["result"], "v")
+        with self.assertRaises(ToolDenied) as ctx:
+            tools.call("read", {"path": "other/b.md"})
+        self.assertEqual(ctx.exception.code, "SCOPE_EXCLUDED")
+        with self.assertRaises(ToolDenied):
+            tools.call("read", {"path": "../escape.md"})
+        denied = [r for r in self.receipts.read_all()
+                  if r["action"] == "denied"]
+        self.assertEqual(len(denied), 2)
+        self.assertTrue(all("SCOPE_EXCLUDED" in r["detail"]["reason"]
+                            for r in denied))
 
     def test_backend_cost_settles_through_ledger(self):
         out = self.wrap([("w", "WRITE", 500, CostlyBackend(300))]).call(
