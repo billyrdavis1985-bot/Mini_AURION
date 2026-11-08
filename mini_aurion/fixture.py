@@ -26,11 +26,14 @@ class FakeModel:
         self.last_cost_nano = 0
         self.seen: list[list] = []
         self.offered: list[list] = []
+        self.systems: list = []
 
-    def complete(self, messages: list[dict], tools: list[str]) -> dict:
+    def complete(self, messages: list[dict], tools: list[str],
+                 system_prompt: str | None = None) -> dict:
         self.calls += 1
         self.seen.append(list(messages))
         self.offered.append(list(tools))
+        self.systems.append(system_prompt)
         if self.script:
             reply = self.script.pop(0)
             return {"text": reply.get("text", ""),

@@ -1,0 +1,15 @@
+{
+  "contract_id": "code-qa.v1",
+  "version": 1,
+  "goal_template": "Answer the research question with cited evidence.",
+  "deliverable": "cited function name per code case; 6 cited bullets per summary case; CANNOT_VERIFY per unanswerable case",
+  "in_scope_paths": [],
+  "out_of_scope_paths": [],
+  "acceptance": [
+    {"id": "A1", "kind": "mechanical",
+     "description": "the grader passes on the final result"},
+    {"id": "A2", "kind": "mechanical",
+     "description": "zero scope-gate denials in the task"}
+  ],
+  "budget": {"spend_usd": "3.00", "messages": 10}
+}

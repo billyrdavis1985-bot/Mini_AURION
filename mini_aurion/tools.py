@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 from . import policy
+from .contract import TaskContract, resource_in_scope
 from .ledger import LedgerError
 from .receipts import ReceiptStore
 
@@ -88,13 +89,15 @@ class ToolRegistry:
 
 class ToolWrapper:
     def __init__(self, registry: ToolRegistry, *, receipts: ReceiptStore,
-                 ledger, stage: str, task_id: str, agent_id: str):
+                 ledger, stage: str, task_id: str, agent_id: str,
+                 scope: TaskContract | None = None):
         self.registry = registry
         self.receipts = receipts
         self.ledger = ledger
         self.stage = stage
         self.task_id = task_id
         self.agent_id = agent_id
+        self.scope = scope
         self._results: dict = {}
 
     @staticmethod
@@ -127,6 +130,20 @@ class ToolWrapper:
                                  outcome="denied")
             raise ToolDenied("BAD_ARGS", f"{name}: arguments must be"
                                         " an object")
+        if self.scope is not None and "path" in args:
+            path = args["path"]
+            if not isinstance(path, str) or not resource_in_scope(
+                    self.scope, path):
+                self.receipts.append(
+                    agent_id=self.agent_id, task_id=self.task_id,
+                    action="denied", tool=name,
+                    detail={"class": action_class,
+                            "reason": f"SCOPE_EXCLUDED: {str(path)[:100]}"
+                                      " is outside the task contract"},
+                    outcome="denied")
+                raise ToolDenied("SCOPE_EXCLUDED",
+                                 f"{name}: {str(path)[:100]} is outside"
+                                 " the task contract")
         verdict, reason = policy.decide(self.stage, action_class,
                                         approved=approved,
                                         allowlisted=allowlisted)

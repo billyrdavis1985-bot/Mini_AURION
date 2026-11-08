@@ -20,6 +20,7 @@ import os
 import posixpath
 import subprocess
 import sys
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,7 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mini_aurion.critic import Critic  # noqa: E402
 from mini_aurion.ledger import Ledger  # noqa: E402
 from mini_aurion.memory import Memory  # noqa: E402
-from mini_aurion.muse import MuseConfig, MuseError, MuseModel  # noqa: E402
+from mini_aurion.muse import (MuseConfig, MuseError, MuseModel,  # noqa: E402
+                                 PLANNER_PROMPT)
+from mini_aurion.contract import load_contract, scope_denials  # noqa: E402
 from mini_aurion.orchestrator import Orchestrator  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 from mini_aurion.specialist import Specialist  # noqa: E402
@@ -36,6 +39,7 @@ from mini_aurion.tools import ToolRegistry, ToolWrapper  # noqa: E402
 
 NANO_PER_USD = 1_000_000_000
 CASES_PATH = Path(__file__).resolve().parent / "code_qa_v1.json"
+CONTRACT_PATH = Path(__file__).resolve().parent / "contract-code-qa-v1.json"
 
 
 class TreeReader:
@@ -261,8 +265,9 @@ def eval_ledger_path(eval_dir: Path) -> Path:
     return _fresh_dir(eval_dir / "ledger.sqlite3")
 
 
-def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
-             ledger: Ledger) -> dict:
+def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
+             ledger: Ledger, template) -> dict:
+    question = case["question"]
     state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
@@ -286,18 +291,31 @@ def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
                         "properties": {"path": {"type": "string"}}})
         model = MuseModel(MuseConfig.from_env())
         estimate = model.worst_case_nano([{"role": "brief", "text": question}])
-        tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
-                            stage="experimental", task_id=task_id,
-                            agent_id="spec")
-        spec = Specialist("spec", model, tools,
-                          model_estimate_nano=estimate)
-        orc = Orchestrator("orc", model, {"spec": spec},
-                           Critic("critic", memory, receipts=receipts),
-                           receipts=receipts,
-                           ledger=ledger, model_estimate_nano=estimate)
         brief = (question + "\n\nTop-level layout of the repo you are"
                  " searching (orient yourself, then read the file most"
                  " likely to hold the answer):\n" + reader.layout())
+        contract = replace(template, goal=brief)
+        tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
+                            stage="experimental", task_id=task_id,
+                            agent_id="spec", scope=contract)
+        spec = Specialist("spec", model, tools,
+                          model_estimate_nano=estimate)
+
+        def grade_check(candidate):
+            ok, _ = grade(case, {"status": candidate["status"],
+                                 "text": candidate["text"],
+                                 "evidence": candidate["evidence"]}, tree)
+            return ok
+
+        orc = Orchestrator(
+            "orc", model, {"spec": spec},
+            Critic("critic", memory, receipts=receipts),
+            receipts=receipts, ledger=ledger,
+            model_estimate_nano=estimate, contract=contract,
+            message_budget=contract.messages,
+            planner_prompt=PLANNER_PROMPT,
+            acceptance=(("A1", grade_check),
+                        ("A2", lambda cand: scope_denials(receipts) == 0)))
         result = orc.run(task_id, brief)
         result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
         return result
@@ -311,18 +329,24 @@ def main(argv=None) -> int:
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--tree", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--cap-usd", default="5.00")
+    parser.add_argument("--cap-usd", default=None)
     args = parser.parse_args(argv)
     if not args.live:
         print("refusing to run: live model calls need --live")
         return 2
     tree = Path(args.tree)
     cases = json.loads(CASES_PATH.read_text())["cases"]
+    template = load_contract(CONTRACT_PATH, "")
+    cap_src = args.cap_usd if args.cap_usd is not None \
+        else template.spend_usd
     try:
-        cap_nano = int(Decimal(args.cap_usd) * NANO_PER_USD)
+        cap_nano = int(Decimal(cap_src) * NANO_PER_USD)
     except Exception:
-        print(f"refusing to run: bad cap {args.cap_usd!r}")
+        print(f"refusing to run: bad cap {cap_src!r}")
         return 2
+    print(f"cap: {cap_src} USD"
+          f" ({'flag override' if args.cap_usd is not None else 'contract'})")
+    print(f"contract: {template.contract_id} v{template.version}")
     try:
         config = MuseConfig.from_env()
     except MuseError as exc:
@@ -366,7 +390,8 @@ def main(argv=None) -> int:
         for n in range(args.runs):
             task_id = f"{case['id']}-r{n + 1}"
             state = eval_dir / task_id
-            result = run_live(case["question"], task_id, tree, state, ledger)
+            result = run_live(case, task_id, tree, state, ledger,
+                              template)
             ok, reasons = grade(case, result, tree)
             valid = result.get("cause", "model") not in INVALID_CAUSES
             passes += ok

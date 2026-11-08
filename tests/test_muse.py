@@ -83,6 +83,23 @@ class MuseTests(unittest.TestCase):
         self.assertIn("read_file", content)
         self.assertIn("a.txt", content)
 
+    def test_system_prompt_override_reaches_the_api(self):
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(self.config).complete([{"role": "user", "text": "hi"}], [],
+                                        system_prompt="PLAN")
+        body = ScriptedHandler.requests[0]["body"]
+        self.assertEqual(body["messages"][0]["content"], "PLAN")
+
+    def test_planner_prompt_is_pinned(self):
+        digest = hashlib.sha256(
+            (muse_mod.PLANNER_VERSION + "\n"
+             + muse_mod.PLANNER_PROMPT).encode("utf-8")).hexdigest()
+        self.assertEqual(muse_mod.PLANNER_VERSION,
+                         "m0.mini-aurion-planner.v1")
+        self.assertEqual(
+            digest,
+            "f49f9ea18a4894748ad98abb7a066944c786ff9e741b576fbedd24580bfc535c")
+
     def test_temperature_zero_is_sent(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
         MuseModel(self.config).complete([{"role": "user", "text": "hi"}], [])
