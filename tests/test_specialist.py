@@ -101,6 +101,17 @@ class SpecialistTests(unittest.TestCase):
                    if m.get("role") == "tool_result"]
         self.assertEqual(results[0]["text"], "bytes")
 
+    def test_tool_results_carry_their_request(self):
+        spec, model = self._wired(
+            [{"text": "", "tool_calls": [{"tool": "read", "args": {"p": "a"}}]},
+             {"text": "done", "evidence": [], "confidence": 0.5}],
+            {"read": "bytes"})
+        spec.investigate("t1", "brief")
+        results = [m for m in model.seen[1]
+                   if m.get("role") == "tool_result"]
+        self.assertEqual(results[0]["tool"], "read")
+        self.assertEqual(results[0]["args"], {"p": "a"})
+
     def test_final_call_is_offered_no_tools(self):
         spec, model = self._wired(
             [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]}] * 3,
@@ -123,7 +134,8 @@ class SpecialistTests(unittest.TestCase):
         self.assertIn(ESCALATE_TEXT, msg.claim)
 
     def test_tool_budget_exhaustion_escalates(self):
-        script = [{"text": "", "tool_calls": [{"tool": "r", "args": {}}]}] * 6
+        script = [{"text": "", "tool_calls": [{"tool": "r", "args": {"n": n}}]}
+                  for n in range(6)]
         msg = self.investigate_with(script, {"r": "v"}, max_tool_calls=2)
         self.assertTrue(msg.escalated)
         self.assertIn("tool budget exhausted", msg.claim)

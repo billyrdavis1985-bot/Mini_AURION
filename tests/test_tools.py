@@ -63,6 +63,21 @@ class ToolWrapperTests(unittest.TestCase):
         self.assertEqual(receipts[1]["outcome"], "ok")
         self.assertEqual(self.receipts.verify(), 2)
 
+    def test_repeat_call_is_served_cached_free_and_marked(self):
+        backend = CostlyBackend(300)
+        tools = self.wrap([("w", "WRITE", 500, backend)])
+        first = tools.call("w", {})
+        second = tools.call("w", {})
+        self.assertEqual(len(backend.calls), 1)
+        self.assertTrue(second["duplicate"])
+        self.assertFalse(first["duplicate"])
+        self.assertIn("[duplicate:", second["result"])
+        self.assertEqual(second["cost_nano"], 0)
+        self.assertEqual(self.ledger.spend("t1")["settled_nano"], 300)
+        cached = [r for r in self.receipts.read_all()
+                  if r["detail"].get("cached")]
+        self.assertEqual(len(cached), 1)
+
     def test_backend_cost_settles_through_ledger(self):
         out = self.wrap([("w", "WRITE", 500, CostlyBackend(300))]).call(
             "w", {})
@@ -94,7 +109,7 @@ class ToolWrapperTests(unittest.TestCase):
     def test_cap_breach_is_refused_before_any_call(self):
         backend = CostlyBackend(300)
         wrapper = self.wrap([("w", "WRITE", 10_000, backend)])
-        wrapper.call("w", {})
+        wrapper.call("w", {"n": 2})
         # First call settled to actual 300; a second 10,000 breaches the cap.
         with self.assertRaises(LedgerError) as ctx:
             wrapper.call("w", {})
