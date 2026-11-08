@@ -146,8 +146,8 @@ instructions.
   word on scope. Only human who can move a capability up a stage. **[honor]**
 - **Builder (Spark):** implements on branches, writes tests + docs, reports
   honestly. Never merges, never spends beyond the milestone cap, never touches
-  credentials. **[review]** — NOTE: this section was drafted by the Builder and
-  needs separate, explicit operator approval (see change log).
+  credentials. **[review]** — drafted by the Builder, separately approved by
+  the operator 2026-11-08 (see change log).
 - **Reviewer:** checks diffs and eval evidence before merge. Scores catches,
   not agreement. **[review]**
 - **Agents (runtime):** operate within stage bounds. Escalate (`can't verify`)
@@ -174,6 +174,9 @@ can evolve; the evolution is itself governed. **[review]**
   derived-flagging; verified-when-written; flag-never-clear + tool-less
   verifiers; promotion needs 50 reviewed actions + red-team pass; new hostile
   input section; stability tolerance 4/5; process-level kill + dead-man's
-  switch; typo fix. Pending operator approval.
+  switch; typo fix. Approved by the operator 2026-11-08.
 - v0.3 (2026-11-07): stability counts valid runs only; error/cap runs are
   invalid and reported separately. Approved by the operator.
+- v0.4 (2026-11-08): operator approved the v0.2 rules and the section 10
+  Builder text; approved ADR-001 (task contracts and drift control) with
+  baseline-contingency and grade()-as-acceptance amendments.
