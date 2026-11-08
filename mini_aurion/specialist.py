@@ -4,7 +4,8 @@ The model investigates: it may call tools (each gated, receipted, and
 costed by ToolWrapper) up to fixed limits. When it stops calling tools, its
 final reply becomes a typed message. If it says CANNOT_VERIFY, or the
 budget runs out, or a tool needs human approval, the result is an
-escalation — never a guess.
+escalation — never a guess. The final call is offered no tools, so the
+loop converges to an answer or an explicit escalation.
 """
 from __future__ import annotations
 
@@ -49,20 +50,34 @@ class Specialist:
                     return self._escalated(
                         task_id, brief, cost_nano,
                         f"spend cap refused model call: {exc}")
-            reply = self.model.complete(
-                messages, tools=self.tools.registry.definitions())
+            # Convergence: the final model call, and any call after the
+            # tools run out, is offered no tools, so exploration cannot
+            # spend the budget answering was meant for. Tool calls in a
+            # stripped reply are void.
+            tools_out = tool_calls_made >= self.max_tool_calls
+            last_call = call_no == self.max_model_calls - 1
+            converging = tools_out or last_call
+            offered = [] if converging \
+                else self.tools.registry.definitions()
+            reply = self.model.complete(messages, tools=offered)
             if reservation is not None:
                 actual = getattr(self.model, "last_cost_nano", 0) or 0
                 self.tools.ledger.settle(reservation, actual)
                 cost_nano += actual
+            calls = [] if converging else reply.get("tool_calls", [])
             self.tools.receipts.append(
                 agent_id=self.agent_id, task_id=task_id, action="model_call",
-                detail={"finish": "tools" if reply["tool_calls"] else "answer"},
+                detail={"finish": "tools" if calls else "answer"},
                 outcome="ok")
-            calls = reply.get("tool_calls", [])
             if not calls:
                 text = reply.get("text", "")
                 if text == ESCALATE_TEXT or not text:
+                    if tools_out:
+                        return self._escalated(task_id, brief, cost_nano,
+                                               "tool budget exhausted")
+                    if last_call:
+                        return self._escalated(task_id, brief, cost_nano,
+                                               "model budget exhausted")
                     return AgentMessage(
                         sender=self.agent_id, task_id=task_id,
                         claim=f"{ESCALATE_TEXT}: {brief[:80]}",

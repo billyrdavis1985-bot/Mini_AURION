@@ -75,6 +75,12 @@ class MuseTests(unittest.TestCase):
         self.thread.join(timeout=5)
         self.tmp.cleanup()
 
+    def test_temperature_zero_is_sent(self):
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(self.config).complete([{"role": "user", "text": "hi"}], [])
+        body = ScriptedHandler.requests[0]["body"]
+        self.assertEqual(body["temperature"], 0.0)
+
     def test_tool_call_reply_maps_and_costs(self):
         ScriptedHandler.script.append((200, answer(
             "", usage={"prompt_tokens": 100, "completion_tokens": 50},
