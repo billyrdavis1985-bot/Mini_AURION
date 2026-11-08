@@ -160,7 +160,14 @@ def _api_message(message: dict) -> dict:
         text = (text[:MAX_MESSAGE_CHARS] +
                 f"\n[truncated: showing {MAX_MESSAGE_CHARS} of {len(text)}"
                 " chars]")
-    if role != "user":
+    # Tool results name their request: without the tool and args the model
+    # cannot tell its own past calls apart and re-issues them (measured
+    # live: list_dir . three times in one task). Tool and args are
+    # harness-known, not model-supplied, so they are safe to render.
+    if role == "tool_result":
+        text = (f"[tool_result {message.get('tool', '')}"
+                f" {message.get('args', {})}]\n{text}")
+    elif role != "user":
         text = f"[{role}] {text}"
     return {"role": "user", "content": text}
 

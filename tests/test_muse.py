@@ -9,7 +9,8 @@ from mini_aurion.critic import Critic
 from mini_aurion.fixture import FakeModel
 from mini_aurion.ledger import Ledger
 from mini_aurion.memory import Memory
-from mini_aurion.muse import MuseConfig, MuseError, MuseModel
+from mini_aurion.muse import (MuseConfig, MuseError, MuseModel,  # noqa: E402
+                                 _api_message)
 from mini_aurion.orchestrator import Orchestrator
 from mini_aurion.receipts import ReceiptStore
 from mini_aurion.specialist import Specialist
@@ -74,6 +75,13 @@ class MuseTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=5)
         self.tmp.cleanup()
+
+    def test_tool_result_names_its_request(self):
+        content = _api_message({"role": "tool_result", "tool": "read_file",
+                                "args": {"path": "a.txt"},
+                                "text": "1: hi"})["content"]
+        self.assertIn("read_file", content)
+        self.assertIn("a.txt", content)
 
     def test_temperature_zero_is_sent(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))

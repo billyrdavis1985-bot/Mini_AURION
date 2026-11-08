@@ -127,7 +127,7 @@ class Specialist:
                 else:
                     text = full
                 messages.append({"role": "tool_result", "tool": name,
-                                 "text": text})
+                                 "args": args, "text": text})
         return self._escalated(task_id, brief, cost_nano,
                                "model budget exhausted")
 

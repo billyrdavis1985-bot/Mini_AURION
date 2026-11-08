@@ -14,6 +14,8 @@ unlabeled or unknown tool is refused, never defaulted to READ.
 """
 from __future__ import annotations
 
+import json
+
 from . import policy
 from .ledger import LedgerError
 from .receipts import ReceiptStore
@@ -93,6 +95,14 @@ class ToolWrapper:
         self.stage = stage
         self.task_id = task_id
         self.agent_id = agent_id
+        self._results: dict = {}
+
+    @staticmethod
+    def _key(name: str, args: dict):
+        try:
+            return (name, json.dumps(args, sort_keys=True))
+        except (TypeError, ValueError):
+            return None
 
     def call(self, name: str, args: dict, *, approved: bool = False,
              allowlisted: bool = False) -> dict:
@@ -135,6 +145,19 @@ class ToolWrapper:
                                  action="approval_requested", tool=name,
                                  detail=request, outcome="ok")
             raise NeedsApproval(request)
+        # Exact repeats are served from cache: free, receipted, and marked,
+        # so a model stuck re-listing a directory pays no budget for it.
+        key = self._key(name, args)
+        if key is not None and key in self._results:
+            begun = self.receipts.begin(
+                agent_id=self.agent_id, task_id=self.task_id,
+                action="tool_call", tool=name,
+                detail={"args": dict(args), "cached": True})
+            self.receipts.settle(begun["seq"], 0, cost_nano=0)
+            return {"result": str(self._results[key])
+                    + "\n[duplicate: you already requested exactly this;"
+                      " no new information]",
+                    "seq": begun["seq"], "cost_nano": 0, "duplicate": True}
         reservation = None
         if estimate_nano > 0:
             try:
@@ -168,4 +191,7 @@ class ToolWrapper:
         self.receipts.settle(begun["seq"], return_code, cost_nano=actual)
         if return_code != 0:
             raise ToolFailed(begun["seq"], error)
-        return {"result": result, "seq": begun["seq"], "cost_nano": actual}
+        if key is not None:
+            self._results[key] = result
+        return {"result": result, "seq": begun["seq"], "cost_nano": actual,
+                "duplicate": False}
