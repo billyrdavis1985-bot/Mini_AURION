@@ -101,6 +101,22 @@ class SpecialistTests(unittest.TestCase):
                    if m.get("role") == "tool_result"]
         self.assertEqual(results[0]["text"], "bytes")
 
+    def test_final_call_is_offered_no_tools(self):
+        spec, model = self._wired(
+            [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]}] * 3,
+            {"read": "bytes"}, max_model_calls=2, max_tool_calls=8)
+        spec.investigate("t1", "brief")
+        self.assertTrue(model.offered[0])
+        self.assertEqual(model.offered[1], [])
+
+    def test_call_after_tools_run_out_is_offered_no_tools(self):
+        spec, model = self._wired(
+            [{"text": "", "tool_calls": [{"tool": "read", "args": {}}]}] * 3,
+            {"read": "bytes"}, max_model_calls=6, max_tool_calls=1)
+        spec.investigate("t1", "brief")
+        self.assertTrue(model.offered[0])
+        self.assertEqual(model.offered[1], [])
+
     def test_model_saying_cannot_verify_escalates(self):
         msg = self.investigate_with([{"text": ESCALATE_TEXT}])
         self.assertTrue(msg.escalated)

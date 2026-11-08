@@ -25,10 +25,12 @@ class FakeModel:
         self.calls = 0
         self.last_cost_nano = 0
         self.seen: list[list] = []
+        self.offered: list[list] = []
 
     def complete(self, messages: list[dict], tools: list[str]) -> dict:
         self.calls += 1
         self.seen.append(list(messages))
+        self.offered.append(list(tools))
         if self.script:
             reply = self.script.pop(0)
             return {"text": reply.get("text", ""),

@@ -115,6 +115,9 @@ class MuseConfig:
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+    # Investigative answers are modal: the most likely answer, reproducibly.
+    # Frozen evals cannot measure a capability that samples at temperature 1.
+    temperature: float = 0.0
 
     def __post_init__(self):
         if not self.api_key:
@@ -190,6 +193,7 @@ class MuseModel:
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}]
                 + [_api_message(m) for m in messages],
                 "max_tokens": self.config.max_output_tokens,
+                "temperature": self.config.temperature,
                 "tool_choice": "auto"}
         if tools:
             body["tools"] = [
