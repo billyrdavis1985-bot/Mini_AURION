@@ -161,7 +161,26 @@ drift beyond 2x, 72h of unexplained quality drop. Format: what happened
 (receipt ids), why, what changes (loop/probe/gate), who owns it. Blameless.
 Filed in-repo. **[review]**
 
-## 12. Changes to this document
+## 12. Task contracts
+
+Every task runs under a frozen, versioned contract: goal, deliverable,
+in/out-of-scope resources, acceptance criteria, budget (ADR-001).
+- Traceability: every planner subtask names the criterion ids it serves;
+  the orchestrator refuses subtasks naming none or unknown ids. **[code]**
+- Scope gate: tool calls outside the contract's scope are refused with a
+  denied receipt, like policy denials. **[code]**
+- Done means accepted: status is complete only when every acceptance
+  criterion passes, else partial naming the failures. **[code]**
+- Judges flag, never clear (see section 8). **[code + review]**
+- Scope changes are new versions, operator-approved; agents may only
+  propose. **[review]** for approval, **[code]** for the version check.
+- The task's first receipt carries the contract hash; task_end carries
+  per-criterion results. **[code]**
+- Drift is measured from receipts: complete-vs-partial share (goal),
+  in-scope call share (scope), critic catches per task (evidence).
+  **[code]**
+
+## 13. Changes to this document
 
 Amendments need operator approval + a line in the change log below. The rules
 can evolve; the evolution is itself governed. **[review]**
@@ -180,3 +199,6 @@ can evolve; the evolution is itself governed. **[review]**
 - v0.4 (2026-11-08): operator approved the v0.2 rules and the section 10
   Builder text; approved ADR-001 (task contracts and drift control) with
   baseline-contingency and grade()-as-acceptance amendments.
+- v0.5 (2026-11-08): new section 12 (task contracts): traceability, scope
+  gate, done-means-accepted, receipted contract hash and criterion
+  results, drift measures. Implemented in M4a. Pending operator approval.
