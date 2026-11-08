@@ -76,6 +76,17 @@ class GraderTests(unittest.TestCase):
             self.tree)
         self.assertFalse(ok)
 
+    def test_code_mention_matches_across_underscore_and_case(self):
+        (self.tree / "mini_aurion" / "receipts.py").write_text(
+            "x\n    def settle(self, seq, return_code):\n")
+        case = CASES["qa-settle-source"]
+        text = ("Settlement outcomes come from the action's Actual Return"
+                " Code, enforced by ReceiptStore.settle.")
+        evidence = [{"kind": "file",
+                     "ref": "mini_aurion/receipts.py:2"}]
+        ok, reasons = grade(case, result(text, evidence), self.tree)
+        self.assertTrue(ok, reasons)
+
     def test_code_escalation_fails(self):
         ok, _ = grade(CASES["qa-unknown-tool"],
                       result("CANNOT_VERIFY: lost", [], status="escalated"),
