@@ -33,6 +33,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval import grade_code_qa  # noqa: E402
+from mini_aurion.contract import load_contract  # noqa: E402
 from mini_aurion.critic import Critic  # noqa: E402
 from mini_aurion.ledger import Ledger  # noqa: E402
 from mini_aurion.memory import Memory  # noqa: E402
@@ -238,8 +239,10 @@ class ReviewFindingsPR11(_LiveHarness):
                "MINI_AURION_MUSE_BASE_URL": self.base_url}
         try:
             with mock.patch.dict(os.environ, env):
-                grade_code_qa.run_live("q", "qa-x-r1", Path(self.corpus),
-                                       state, led)
+                grade_code_qa.run_live(
+                    {"id": "qa-x", "type": "unanswerable", "question": "q"},
+                    "qa-x-r1", Path(self.corpus), state, led,
+                    load_contract(grade_code_qa.CONTRACT_PATH, "q"))
         finally:
             led.close()
         self.assertTrue((state / "receipts.jsonl").exists()
