@@ -8,8 +8,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval.grade_code_qa import (TreeReader, grade, out_inside_tree,  # noqa: E402
-                                   repo_state, tree_clean)
+from eval.grade_code_qa import (TreeReader, eval_ledger_path, grade,  # noqa: E402
+                                   out_inside_tree, repo_state, tree_clean)
 
 CASES = {c["id"]: c for c in json.loads(
     (Path(__file__).resolve().parent.parent / "eval" / "code_qa_v1.json")
@@ -203,6 +203,13 @@ class GraderTests(unittest.TestCase):
         self.assertTrue(out_inside_tree(tree, tree))
         self.assertFalse(out_inside_tree(Path(self.tmp.name) / "o.json",
                                          tree))
+
+    def test_ledger_path_is_fresh_per_invocation(self):
+        sooner = eval_ledger_path(self.tree)
+        sooner.write_text("x")
+        later = eval_ledger_path(self.tree)
+        self.assertNotEqual(sooner, later)
+        self.assertTrue(str(later).endswith("-a2"))
 
     def test_cases_file_is_frozen(self):
         frozen = json.loads(
