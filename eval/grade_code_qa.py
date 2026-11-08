@@ -67,6 +67,11 @@ class TreeReader:
         return "\n".join(f"{n}: {line}"
                          for n, line in enumerate(text.splitlines(), 1))
 
+    def layout(self) -> str:
+        """Top-level listing, so the brief can orient the agent before it
+        spends tool calls rediscovering the root."""
+        return self._list(".")
+
     def _list(self, path: str) -> str:
         target = self._confine(path)
         if not target.is_dir():
@@ -275,7 +280,10 @@ def run_live(question: str, task_id: str, tree: Path, state_dir: Path,
                            Critic("critic", memory, receipts=receipts),
                            receipts=receipts,
                            ledger=ledger, model_estimate_nano=estimate)
-        result = orc.run(task_id, question)
+        brief = (question + "\n\nTop-level layout of the repo you are"
+                 " searching (orient yourself, then read the file most"
+                 " likely to hold the answer):\n" + reader.layout())
+        result = orc.run(task_id, brief)
         result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
         return result
     finally:
