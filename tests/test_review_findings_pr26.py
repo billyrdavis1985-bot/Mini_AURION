@@ -1,9 +1,8 @@
 """Reviewer findings on #26 (tool-result labels + duplicate-call cache),
-kept as expected-failure tests.
+kept as regression tests.
 
-Each test fails today. When its fix lands, unittest reports "unexpected
-success" and CI fails until that test's marker is deleted; the test then
-stays as a regression guard, per the review-findings contract.
+All findings are fixed; markers were deleted with each fix, per the
+review-findings contract.
 
 No network, no API key, $0.
 """
@@ -55,7 +54,6 @@ class _Env(unittest.TestCase):
 
 class CacheOnlyRepeatsReads(_Env):
 
-    @unittest.expectedFailure
     def test_J1_a_repeated_write_runs_again(self):
         """The cache serves every action class. A second identical WRITE
         (append a line, send a message) never runs, yet its receipt settles
@@ -75,7 +73,6 @@ class CacheOnlyRepeatsReads(_Env):
         self.assertEqual(len(backend.invocations), 2,
                          "second WRITE skipped but receipted as settled ok")
 
-    @unittest.expectedFailure
     def test_J1_a_human_approved_repeat_runs(self):
         """Same cause, at `gated`: the operator explicitly approves a second
         identical WRITE, and the cache swallows it. Approval is the one
@@ -91,7 +88,6 @@ class CacheOnlyRepeatsReads(_Env):
 
 class DuplicateNoticeIsTrue(_Env):
 
-    @unittest.expectedFailure
     def test_J2_the_retry_is_not_told_it_already_has_the_content(self):
         """The cache lives on the ToolWrapper, which is per task. The
         orchestrator's retry calls investigate() again on the same
@@ -132,7 +128,6 @@ class DuplicateNoticeIsTrue(_Env):
         self.assertNotIn("[duplicate", retry_context[1]["text"],
                          "fresh context told it already has this content")
 
-    @unittest.expectedFailure
     def test_J3_the_duplicate_notice_survives_a_long_result(self):
         """The notice is appended AFTER the content, and the specialist
         then cuts at MAX_TOOL_CHARS. For any result over 12,000 chars
@@ -159,7 +154,6 @@ class DuplicateNoticeIsTrue(_Env):
 
 class LabelIsBounded(unittest.TestCase):
 
-    @unittest.expectedFailure
     def test_J4_the_request_label_respects_the_message_cap(self):
         """_api_message truncates the text to MAX_MESSAGE_CHARS, then
         prepends '[tool_result <tool> <args>]'. Args are model-chosen, so

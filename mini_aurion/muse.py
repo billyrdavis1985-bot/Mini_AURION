@@ -165,8 +165,11 @@ def _api_message(message: dict) -> dict:
     # live: list_dir . three times in one task). Tool and args are
     # harness-known, not model-supplied, so they are safe to render.
     if role == "tool_result":
+        args_repr = repr(message.get("args", {}))
+        if len(args_repr) > 200:
+            args_repr = args_repr[:200] + "...[args truncated]"
         text = (f"[tool_result {message.get('tool', '')}"
-                f" {message.get('args', {})}]\n{text}")
+                f" {args_repr}]\n{text}")
     elif role != "user":
         text = f"[{role}] {text}"
     return {"role": "user", "content": text}

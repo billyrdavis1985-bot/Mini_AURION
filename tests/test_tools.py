@@ -63,15 +63,16 @@ class ToolWrapperTests(unittest.TestCase):
         self.assertEqual(receipts[1]["outcome"], "ok")
         self.assertEqual(self.receipts.verify(), 2)
 
-    def test_repeat_call_is_served_cached_free_and_marked(self):
+    def test_repeat_read_is_a_pointer_not_the_content_again(self):
         backend = CostlyBackend(300)
-        tools = self.wrap([("w", "WRITE", 500, backend)])
-        first = tools.call("w", {})
-        second = tools.call("w", {})
+        tools = self.wrap([("r", "READ", 500, backend)])
+        first = tools.call("r", {})
+        second = tools.call("r", {})
         self.assertEqual(len(backend.calls), 1)
         self.assertTrue(second["duplicate"])
         self.assertFalse(first["duplicate"])
         self.assertIn("[duplicate:", second["result"])
+        self.assertNotIn("done", second["result"])
         self.assertEqual(second["cost_nano"], 0)
         self.assertEqual(self.ledger.spend("t1")["settled_nano"], 300)
         cached = [r for r in self.receipts.read_all()
