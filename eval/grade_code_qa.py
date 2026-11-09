@@ -258,6 +258,20 @@ def _fresh_dir(path: Path) -> Path:
     return path.parent / f"{path.name}-a{n}"
 
 
+def select_cases(cases: list, names: str | None) -> list:
+    """Subset the eval set by comma-separated ids, in set order. Unknown
+    ids refuse: a mistyped case must fail loudly, never silently narrow
+    a measurement."""
+    if names is None:
+        return list(cases)
+    wanted = [n.strip() for n in names.split(",") if n.strip()]
+    unknown = [n for n in wanted
+               if not any(c["id"] == n for c in cases)]
+    if unknown:
+        raise ValueError(f"unknown cases: {', '.join(unknown)}")
+    return [c for c in cases if c["id"] in wanted]
+
+
 def eval_ledger_path(eval_dir: Path) -> Path:
     """One ledger per eval invocation. The cap budgets a single experiment;
     reusing the ledger would stack every past batch against it until the
@@ -331,6 +345,7 @@ def main(argv=None) -> int:
     parser.add_argument("--tree", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--cap-usd", default=None)
+    parser.add_argument("--cases", default=None)
     args = parser.parse_args(argv)
     if not args.live:
         print("refusing to run: live model calls need --live")
@@ -382,9 +397,18 @@ def main(argv=None) -> int:
     eval_dir.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(eval_ledger_path(eval_dir), task_cap_nano=cap_nano,
                     daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
+    try:
+        selected = select_cases(cases, args.cases)
+    except ValueError as exc:
+        print(f"refusing to run: {exc}")
+        return 2
+    if not selected:
+        print("refusing to run: no cases selected")
+        return 2
     report: dict = {"set": "code-qa.v1", "runs": args.runs,
-                    "runner_commit": report_head, "cases": {}}
-    for case in cases:
+                    "runner_commit": report_head,
+                    "cases_run": [c["id"] for c in selected], "cases": {}}
+    for case in selected:
         passes = 0
         invalid = 0
         details = []
