@@ -7,6 +7,7 @@ from mini_aurion.critic import Critic
 from mini_aurion.fixture import FakeModel, FakeTools
 from mini_aurion.ledger import Ledger
 from mini_aurion.memory import Memory
+from mini_aurion.messages import AgentMessage
 from mini_aurion.orchestrator import Orchestrator
 from mini_aurion.receipts import ReceiptStore
 from mini_aurion.specialist import Specialist
@@ -52,11 +53,16 @@ class OrchestratorTests(unittest.TestCase):
 
     def build(self, plan_reply, spec_scripts, synth_text="done",
               budget=10, synth_evidence=None, contract=None,
-              acceptance=(), planner_prompt=None):
+              acceptance=(), planner_prompt=None, judge_prompt=None,
+              judge_text="RELEVANT: answers it"):
         synth = {"text": synth_text,
                  "evidence": synth_evidence
                  if synth_evidence is not None else GOOD_EVIDENCE}
-        orc_model = FakeModel([plan_reply, synth])
+        script = [plan_reply]
+        if judge_prompt is not None:
+            script.append({"text": judge_text})
+        script.append(synth)
+        orc_model = FakeModel(script)
         specialists = {}
         for name, script in spec_scripts.items():
             tools = ToolWrapper(ToolRegistry(), receipts=self.receipts,
@@ -75,7 +81,8 @@ class OrchestratorTests(unittest.TestCase):
                            ledger=self.ledger, message_budget=budget,
                            model_estimate_nano=0, contract=contract,
                            acceptance=acceptance,
-                           planner_prompt=planner_prompt)
+                           planner_prompt=planner_prompt,
+                           judge_prompt=judge_prompt)
         self.last_orc_model = orc_model
         return orc
 
@@ -175,6 +182,69 @@ class OrchestratorTests(unittest.TestCase):
             acceptance=(("A1", lambda cand: True),))
         result = orc.run("t1", "question?")
         self.assertEqual(result["status"], "complete")
+
+    def test_relevant_finding_is_kept(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract(),
+            judge_prompt="J")
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["findings"][0]["status"], "accepted")
+        checks = [r for r in self.receipts.read_all()
+                  if r["action"] == "relevance_check"]
+        self.assertEqual(checks[0]["detail"]["verdict"], "relevant")
+
+    def test_irrelevant_finding_is_flagged_and_excluded(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract(),
+            judge_prompt="J", judge_text="IRRELEVANT: mere listing")
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["findings"][0]["status"], "flagged")
+        self.assertEqual(result["status"], "escalated")
+
+    def test_unparseable_judge_reply_keeps_the_finding(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract(),
+            judge_prompt="J", judge_text="maybe so")
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["findings"][0]["status"], "accepted")
+        checks = [r for r in self.receipts.read_all()
+                  if r["action"] == "relevance_check"]
+        self.assertEqual(checks[0]["detail"]["verdict"], "error")
+
+    def test_judge_error_keeps_the_finding(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract(),
+            judge_prompt="J")
+
+        class Boom:
+            def complete(self, *args, **kwargs):
+                raise RuntimeError("boom")
+
+        orc.model = Boom()
+        msg = AgentMessage(sender="alpha", task_id="t1", claim="c",
+                           evidence=[], confidence=0.5)
+        self.assertFalse(orc._judge("t1", "q?", {"id": "s1"}, msg))
+        checks = [r for r in self.receipts.read_all()
+                  if r["action"] == "relevance_check"]
+        self.assertEqual(checks[0]["detail"]["verdict"], "error")
+
+    def test_delegate_receipts_carry_briefs(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha",
+                  "criteria": ["A1"]}),
+            {"alpha": [answer("A")]}, contract=contract())
+        orc.run("t1", "question?")
+        delegates = [r for r in self.receipts.read_all()
+                     if r["action"] == "delegate"]
+        self.assertEqual(delegates[0]["detail"]["brief"], "b1")
 
     def test_synthesis_sees_the_question(self):
         orc = self.build(

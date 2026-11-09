@@ -30,7 +30,7 @@ from mini_aurion.critic import Critic  # noqa: E402
 from mini_aurion.ledger import Ledger  # noqa: E402
 from mini_aurion.memory import Memory  # noqa: E402
 from mini_aurion.muse import (MuseConfig, MuseError, MuseModel,  # noqa: E402
-                                 PLANNER_PROMPT)
+                                 PLANNER_PROMPT, RELEVANCE_PROMPT)
 from mini_aurion.contract import load_contract, scope_denials  # noqa: E402
 from mini_aurion.orchestrator import Orchestrator  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
@@ -314,6 +314,7 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
             model_estimate_nano=estimate, contract=contract,
             message_budget=contract.messages,
             planner_prompt=PLANNER_PROMPT,
+            judge_prompt=RELEVANCE_PROMPT,
             acceptance=(("A1", grade_check),
                         ("A2", lambda cand: scope_denials(receipts) == 0)))
         result = orc.run(task_id, brief)

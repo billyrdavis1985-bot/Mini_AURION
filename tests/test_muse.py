@@ -95,10 +95,20 @@ class MuseTests(unittest.TestCase):
             (muse_mod.PLANNER_VERSION + "\n"
              + muse_mod.PLANNER_PROMPT).encode("utf-8")).hexdigest()
         self.assertEqual(muse_mod.PLANNER_VERSION,
-                         "m0.mini-aurion-planner.v1")
+                         "m0.mini-aurion-planner.v2")
         self.assertEqual(
             digest,
-            "f49f9ea18a4894748ad98abb7a066944c786ff9e741b576fbedd24580bfc535c")
+            "e1fc7c55063f3daa8d2029417969db5030d563934d657f7d0f66cc892ddeb598")
+
+    def test_relevance_prompt_is_pinned(self):
+        digest = hashlib.sha256(
+            (muse_mod.RELEVANCE_VERSION + "\n"
+             + muse_mod.RELEVANCE_PROMPT).encode("utf-8")).hexdigest()
+        self.assertEqual(muse_mod.RELEVANCE_VERSION,
+                         "m0.mini-aurion-relevance.v1")
+        self.assertEqual(
+            digest,
+            "6d539025f5a2813072fb85329e6188a7fd5bc35594b0f936526253d151a3836f")
 
     def test_temperature_zero_is_sent(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
