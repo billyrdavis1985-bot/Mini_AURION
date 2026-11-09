@@ -23,7 +23,8 @@ class Orchestrator:
                  model_estimate_nano: int,
                  contract: TaskContract | None = None,
                  acceptance: tuple = (),
-                 planner_prompt: str | None = None):
+                 planner_prompt: str | None = None,
+                 judge_prompt: str | None = None):
         """model_estimate_nano is required: 0 asserts the builder knows the
         model is free. Metering is never silently off. With a contract, the
         plan is validated against its criteria and completion requires every
@@ -41,6 +42,7 @@ class Orchestrator:
         self.contract = contract
         self.acceptance = tuple(acceptance)
         self.planner_prompt = planner_prompt
+        self.judge_prompt = judge_prompt
         self.messages_used = 0
 
     def _complete(self, task_id: str, messages: list,
@@ -110,7 +112,7 @@ class Orchestrator:
             if self.messages_used >= self.message_budget:
                 unattempted.append(sub["id"])
                 continue
-            findings.append(self._delegate(task_id, sub))
+            findings.append(self._delegate(task_id, sub, question))
         accepted = [f for f in findings if f["status"] == "accepted"]
         synth_note = ""
         if not accepted:
@@ -211,6 +213,8 @@ class Orchestrator:
             if not isinstance(sub, dict):
                 continue
             sid = sub.get("id", "?")
+            if not isinstance(sub.get("brief"), str) or not sub["brief"]:
+                continue
             claimed = sub.get("criteria", [])
             unknown = [c for c in claimed if c not in known]
             if not claimed or unknown:
@@ -221,6 +225,7 @@ class Orchestrator:
                     action="delegate",
                     detail={"subtask": sid,
                             "to": sub.get("specialist", "?"),
+                            "brief": sub["brief"][:300],
                             "reason": reason},
                     outcome="denied")
                 refused.append(
@@ -236,7 +241,7 @@ class Orchestrator:
             return [default], []
         return runnable, refused
 
-    def _delegate(self, task_id: str, sub: dict) -> dict:
+    def _delegate(self, task_id: str, sub: dict, question: str) -> dict:
         name = sub.get("specialist", next(iter(self.specialists), "none"))
         specialist = self.specialists.get(name)
         if specialist is None:
@@ -252,12 +257,16 @@ class Orchestrator:
                         escalated=True)}
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
                              action="delegate",
-                             detail={"subtask": sub["id"], "to": name},
+                             detail={"subtask": sub["id"], "to": name,
+                                     "brief": str(sub.get("brief", ""))[:300]},
                              outcome="ok")
         message = self._investigate(task_id, specialist, sub["brief"])
         check = self.critic.check(message)
         self._record_check(task_id, sub["id"], message, check, attempt=1)
         if check["verdict"] == "pass":
+            if self._judge(task_id, question, sub, message):
+                return {"subtask": sub["id"], "status": "flagged",
+                        "message": message}
             return {"subtask": sub["id"], "status": "accepted",
                     "message": message}
         if check["verdict"] == "escalated":
@@ -272,9 +281,46 @@ class Orchestrator:
         recheck = self.critic.check(retry)
         self._record_check(task_id, sub["id"], retry, recheck, attempt=2)
         if recheck["verdict"] == "pass":
+            if self._judge(task_id, question, sub, retry):
+                return {"subtask": sub["id"], "status": "flagged",
+                        "message": retry}
             return {"subtask": sub["id"], "status": "accepted",
                     "message": retry}
         return {"subtask": sub["id"], "status": "escalated", "message": retry}
+
+    def _judge(self, task_id: str, question: str, sub: dict,
+               message) -> bool:
+        """Flag-only relevance check on a passed finding. True flags it.
+        Runs only when a judge prompt is configured. Unparseable replies
+        and judge errors keep the finding: the judge is a backstop, and
+        its own failure is receipted, never silent."""
+        if self.judge_prompt is None:
+            return False
+        try:
+            reply = self._complete(
+                task_id, [{"role": "question", "text": question},
+                          {"role": "finding", "text": message.claim}],
+                system=self.judge_prompt)
+            verdict, _, reason = reply.get("text", "").partition(":")
+            decision = verdict.strip().casefold()
+            if decision not in ("relevant", "irrelevant"):
+                raise ValueError(
+                    f"unparseable judge reply: {reply.get('text', '')[:50]!r}")
+        except Exception as exc:
+            self.receipts.append(
+                agent_id=self.agent_id, task_id=task_id,
+                action="relevance_check",
+                detail={"subtask": sub.get("id", "?"), "verdict": "error",
+                        "reason": f"{type(exc).__name__}: {exc}"[:200]},
+                outcome="ok")
+            return False
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id,
+            action="relevance_check",
+            detail={"subtask": sub.get("id", "?"), "verdict": decision,
+                    "reason": reason.strip()[:200]},
+            outcome="ok")
+        return decision == "irrelevant"
 
     def _record_check(self, task_id: str, subtask: str, message,
                       check: dict, attempt: int) -> None:
