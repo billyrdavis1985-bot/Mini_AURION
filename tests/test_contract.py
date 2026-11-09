@@ -10,6 +10,7 @@ from mini_aurion.contract import (TaskContract, contract_hash,  # noqa: E402
                                  resource_in_scope, scope_denials)
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 
+import json
 import os
 import tempfile
 
@@ -28,11 +29,26 @@ class ContractTests(unittest.TestCase):
     def test_shipped_template_loads(self):
         loaded = load_contract(CONTRACT_PATH, "goal here")
         self.assertEqual(loaded.contract_id, "code-qa.v1")
-        self.assertEqual(loaded.version, 1)
+        self.assertEqual(loaded.version, 2)
         self.assertEqual(loaded.goal, "goal here")
         self.assertEqual(loaded.criterion_ids(), frozenset({"A1", "A2"}))
         self.assertEqual(loaded.spend_usd, "3.00")
         self.assertEqual(loaded.messages, 10)
+        self.assertFalse(loaded.decompose)
+
+    def test_decompose_defaults_off(self):
+        self.assertFalse(contract().decompose)
+        self.assertNotEqual(contract_hash(contract()),
+                            contract_hash(contract(decompose=True)))
+        with tempfile.TemporaryDirectory(prefix="ma-ct-") as tmp:
+            path = os.path.join(tmp, "c.json")
+            with open(path, "w") as fh:
+                json.dump({"contract_id": "t", "version": 1,
+                           "decompose": True}, fh)
+            self.assertTrue(load_contract(path, "g").decompose)
+            with open(path, "w") as fh:
+                json.dump({"contract_id": "t", "version": 1}, fh)
+            self.assertFalse(load_contract(path, "g").decompose)
 
     def test_hash_stable_and_goal_sensitive(self):
         self.assertEqual(contract_hash(contract()),

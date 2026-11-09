@@ -1,6 +1,7 @@
 """Orchestrator: hub-spoke task runner with critic verification.
 
-Flow: decompose the question into subtasks → delegate each to a specialist
+Flow: plan subtasks (or run the question as one subtask when the
+contract leaves decomposition off) → delegate each to a specialist
 → critic-check every answer → one retry on failure → synthesize accepted
 answers. Escalations and exhausted budgets produce partial results, never
 guesses. Task start/end and every delegation are receipted; inter-agent
@@ -98,12 +99,20 @@ class Orchestrator:
                  "text": render_for_planner(self.contract,
                                             sorted(self.specialists))})
             system = self.planner_prompt
-        try:
-            plan = self._complete(task_id, plan_messages, system=system)
-        except _ModelRefused as exc:
-            return self._finish(task_id, [], [], "escalated",
-                                f"CANNOT_VERIFY: plan refused: {exc}"[:300],
-                                [], f"plan refused: {exc}", cause="cap")
+        if self.contract is not None and not self.contract.decompose:
+            # Decomposition is opt-in: without it the question runs as
+            # one subtask and the planner model is never called. The
+            # empty plan reuses the validated default-subtask fallback,
+            # so criteria tags, scope, acceptance, and judge still apply.
+            plan = {"subtasks": []}
+        else:
+            try:
+                plan = self._complete(task_id, plan_messages, system=system)
+            except _ModelRefused as exc:
+                return self._finish(
+                    task_id, [], [], "escalated",
+                    f"CANNOT_VERIFY: plan refused: {exc}"[:300],
+                    [], f"plan refused: {exc}", cause="cap")
         subtasks, refused = self._validate_plan(
             task_id, plan.get("subtasks", []), question)
         findings: list[dict] = refused

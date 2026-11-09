@@ -1,6 +1,7 @@
 {
   "contract_id": "code-qa.v1",
-  "version": 1,
+  "version": 2,
+  "decompose": false,
   "goal_template": "Answer the research question with cited evidence.",
   "deliverable": "cited function name per code case; 6 cited bullets per summary case; CANNOT_VERIFY per unanswerable case",
   "in_scope_paths": [],

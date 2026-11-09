@@ -32,6 +32,7 @@ class TaskContract:
     acceptance: tuple = ()
     spend_usd: str = "3.00"
     messages: int = 10
+    decompose: bool = False
 
     def criterion_ids(self) -> frozenset:
         return frozenset(c.id for c in self.acceptance)
@@ -51,7 +52,8 @@ def load_contract(path: str | Path, goal: str) -> TaskContract:
                                    str(c.get("description", "")))
                          for c in raw.get("acceptance", [])),
         spend_usd=str(raw.get("budget", {}).get("spend_usd", "3.00")),
-        messages=int(raw.get("budget", {}).get("messages", 10)))
+        messages=int(raw.get("budget", {}).get("messages", 10)),
+        decompose=bool(raw.get("decompose", False)))
 
 
 def contract_hash(contract: TaskContract) -> str:
@@ -65,6 +67,7 @@ def contract_hash(contract: TaskContract) -> str:
                         "description": c.description}
                        for c in contract.acceptance],
         "spend_usd": contract.spend_usd, "messages": contract.messages,
+        "decompose": contract.decompose,
     }, sort_keys=True)
     return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
 

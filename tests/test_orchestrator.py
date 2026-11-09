@@ -27,11 +27,15 @@ def answer(text, evidence=None):
             "confidence": 0.9}
 
 
-def contract(ids=("A1", "A2")):
+def contract(ids=("A1", "A2"), decompose=True):
+    # Planner-path contract: decomposition is opt-in, and these tests
+    # exercise the planner, so they opt in. decompose=False is covered
+    # by its own tests below.
     return TaskContract(contract_id="t", version=1, goal="g",
                         deliverable="d",
                         acceptance=tuple(Criterion(i, "mechanical", i)
-                                         for i in ids))
+                                         for i in ids),
+                        decompose=decompose)
 
 
 class OrchestratorTests(unittest.TestCase):
@@ -145,6 +149,26 @@ class OrchestratorTests(unittest.TestCase):
         result = orc.run("t1", "question?")
         self.assertEqual(
             [f["status"] for f in result["findings"]], ["refused"])
+
+    def test_no_decompose_skips_planner(self):
+        orc = self.build({"text": "ignored plan",
+                          "evidence": GOOD_EVIDENCE},
+                         {"alpha": [answer("A")]},
+                         contract=contract(decompose=False))
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual([f["subtask"] for f in result["findings"]],
+                         ["s1"])
+        self.assertEqual(self.last_orc_model.calls, 1)
+        self.assertEqual(self.last_orc_model.systems, [None])
+
+    def test_no_decompose_still_enforces_acceptance(self):
+        orc = self.build({"text": "ignored plan"},
+                         {"alpha": [answer("A")]},
+                         contract=contract(decompose=False),
+                         acceptance=(("A1", lambda cand: False),))
+        result = orc.run("t1", "question?")
+        self.assertEqual(result["status"], "partial")
 
     def test_planner_receives_prompt_and_contract(self):
         orc = self.build(
