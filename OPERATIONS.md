@@ -201,4 +201,5 @@ can evolve; the evolution is itself governed. **[review]**
   baseline-contingency and grade()-as-acceptance amendments.
 - v0.5 (2026-11-08): new section 12 (task contracts): traceability, scope
   gate, done-means-accepted, receipted contract hash and criterion
-  results, drift measures. Implemented in M4a. Pending operator approval.
+  results, drift measures. Implemented in M4a. Approved by the operator
+  2026-11-10.
