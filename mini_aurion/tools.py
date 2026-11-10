@@ -134,16 +134,18 @@ class ToolWrapper:
             path = args["path"]
             if not isinstance(path, str) or not resource_in_scope(
                     self.scope, path):
+                allowed = ", ".join(self.scope.in_scope_paths) \
+                    or "the whole tree (this path escapes it)"
+                reason = (f"SCOPE_EXCLUDED: {str(path)[:100]} is outside"
+                          " the task contract; in scope: "
+                          + str(allowed)[:200])
                 self.receipts.append(
                     agent_id=self.agent_id, task_id=self.task_id,
                     action="denied", tool=name,
-                    detail={"class": action_class,
-                            "reason": f"SCOPE_EXCLUDED: {str(path)[:100]}"
-                                      " is outside the task contract"},
+                    detail={"class": action_class, "reason": reason},
                     outcome="denied")
                 raise ToolDenied("SCOPE_EXCLUDED",
-                                 f"{name}: {str(path)[:100]} is outside"
-                                 " the task contract")
+                                 f"{name}: {reason}")
         verdict, reason = policy.decide(self.stage, action_class,
                                         approved=approved,
                                         allowlisted=allowlisted)

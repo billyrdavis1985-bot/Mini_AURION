@@ -135,3 +135,14 @@ def scope_denials(receipts) -> int:
                if r.get("action") == "denied"
                and "SCOPE_EXCLUDED" in str(r.get("detail", {}).get(
                    "reason", "")))
+
+
+def scope_adherence(receipts) -> tuple[int, int]:
+    """(in-scope, total) tool-call attempts. The gate runs before the
+    tool_call receipt, so every tool_call receipt passed it; denied
+    attempts surface only as denied receipts and count as
+    out-of-scope attempts."""
+    calls = sum(1 for r in receipts.read_all()
+                if r.get("action") == "tool_call")
+    denied = scope_denials(receipts)
+    return calls, calls + denied

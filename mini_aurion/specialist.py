@@ -113,6 +113,14 @@ class Specialist:
                         f"needs approval: {exc.request['action_class']}"
                         f" {exc.request['tool']}")
                 except ToolDenied as exc:
+                    if exc.code == "SCOPE_EXCLUDED":
+                        # Scope is a fence, not a cliff: the denial names
+                        # the allowed paths, so the model can comply and
+                        # continue. Policy denials stay fatal below.
+                        messages.append(
+                            {"role": "tool_error",
+                             "text": f"{name} denied: {exc}"[:500]})
+                        continue
                     return self._escalated(
                         task_id, brief, cost_nano, f"tool denied: {exc}")
                 except ToolFailed as exc:

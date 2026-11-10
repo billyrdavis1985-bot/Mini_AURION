@@ -280,7 +280,7 @@ def eval_ledger_path(eval_dir: Path) -> Path:
 
 
 def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
-             ledger: Ledger, template) -> dict:
+             ledger: Ledger, template, scope_note: str = "") -> dict:
     question = case["question"]
     state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -305,7 +305,8 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
                         "properties": {"path": {"type": "string"}}})
         model = MuseModel(MuseConfig.from_env())
         estimate = model.worst_case_nano([{"role": "brief", "text": question}])
-        brief = (question + "\n\nTop-level layout of the repo you are"
+        brief = (question + scope_note
+                 + "\n\nTop-level layout of the repo you are"
                  " searching (orient yourself, then read the file most"
                  " likely to hold the answer):\n" + reader.layout())
         contract = replace(template, goal=brief)
@@ -333,6 +334,7 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
                         ("A2", lambda cand: scope_denials(receipts) == 0)))
         result = orc.run(task_id, brief)
         result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
+        result["receipts_path"] = str(state_dir / "receipts.jsonl")
         return result
     finally:
         memory.close()

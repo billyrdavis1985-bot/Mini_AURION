@@ -249,6 +249,27 @@ class ReviewFindingsPR11(_LiveHarness):
                         and "earlier" in (state / "receipts.jsonl").read_text(),
                         "the earlier run's receipts were deleted")
 
+    def test_scope_note_lands_in_the_brief(self):
+        state = Path(self.dir) / "state" / "qa-x-r1"
+        led = Ledger(os.path.join(self.dir, "eval-l.db"), task_cap_nano=BIG,
+                     daily_cap_nano=BIG, global_cap_nano=BIG)
+        env = {"MODEL_API_KEY": "test-key",
+               "MINI_AURION_MUSE_BASE_URL": self.base_url}
+        try:
+            with mock.patch.dict(os.environ, env):
+                result = grade_code_qa.run_live(
+                    {"id": "qa-x", "type": "unanswerable", "question": "q"},
+                    "qa-x-r1", Path(self.corpus), state, led,
+                    load_contract(grade_code_qa.CONTRACT_PATH, "q"),
+                    scope_note="\n\nSCOPE-MARKER-ONLY")
+        finally:
+            led.close()
+        starts = [r for r in ReceiptStore(
+            result["receipts_path"]).read_all()
+            if r["action"] == "task_start"]
+        self.assertEqual(len(starts), 1)
+        self.assertIn("SCOPE-MARKER-ONLY", starts[0]["detail"]["question"])
+
     def test_F3_the_grader_refuses_a_tree_that_is_not_the_frozen_commit(self):
         """main() never checks that --tree is a checkout of frozen_commit.
         Pointed at the live repo, the model can list_dir its way to
