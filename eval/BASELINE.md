@@ -94,3 +94,5 @@ it is not used to compare versions.
 
 | batch | candidate commit | question | cases | valid runs | passes | invalid | cost | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| solids-exploratory | 8bfdca5 | Q2 (part: 2 of 3 cases) | unknown, newsletter | 20 | 12 | 0 | $0.81 | Ran before Q1 with tier omitted: order/coverage deviation. unknown 2/10 is a registered regression; receipts show planner fragmentation (4 wrong-evidence answers, 4 declines). Planner abandoned for code-QA. |
+| gate-rerun | 8dadf72 | none (revert check) | all 5 x 5 | 25 | 17 | 0 | $0.85 | Contract v2, decompose off. 3/5 stable (settle, tier, newsletter). Zero answered-wrong; only the M3 decline mode remains. |
