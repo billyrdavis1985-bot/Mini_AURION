@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval.grade_code_qa import grade  # noqa: E402
 from eval.grade_drift import (DRIFT_PATH, drift_contract,  # noqa: E402
-                                 frozen_match, main)
+                                 drift_note, frozen_match, main)
 
 
 class DriftTests(unittest.TestCase):
@@ -61,6 +61,12 @@ class DriftTests(unittest.TestCase):
                  "evidence": []},
                 Path(tmp))
             self.assertTrue(ok)
+
+    def test_drift_note_licenses_decline(self):
+        note = drift_note({"brief_scope": "Use ONLY a.py."})
+        self.assertIn("Use ONLY a.py.", note)
+        self.assertIn("CANNOT_VERIFY", note)
+        self.assertIn("do not guess", note)
 
     def test_main_refuses_without_live(self):
         self.assertEqual(main(["--tree", "x", "--out", "y"]), 2)
