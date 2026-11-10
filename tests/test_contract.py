@@ -7,7 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mini_aurion.contract import (TaskContract, contract_hash,  # noqa: E402
                                  load_contract, render_for_planner,
-                                 resource_in_scope, scope_denials)
+                                 resource_in_scope, scope_adherence,
+                                 scope_denials)
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 
 import json
@@ -83,6 +84,22 @@ class ContractTests(unittest.TestCase):
         self.assertIn("A1", text)
         self.assertIn("A2", text)
         self.assertIn("spec", text)
+
+    def test_scope_adherence_counts_calls_over_attempts(self):
+        with tempfile.TemporaryDirectory(prefix="ma-ct-") as tmp:
+            receipts = ReceiptStore(os.path.join(tmp, "r.jsonl"))
+            for _ in range(3):
+                receipts.append(agent_id="s", task_id="t",
+                                action="tool_call", tool="read_file",
+                                detail={"args": {"path": "a.md"}},
+                                outcome="ok")
+            receipts.append(agent_id="s", task_id="t", action="denied",
+                            detail={"reason": "SCOPE_EXCLUDED: x"},
+                            outcome="denied")
+            receipts.append(agent_id="s", task_id="t", action="denied",
+                            detail={"reason": "POLICY_DENIED"},
+                            outcome="denied")
+            self.assertEqual(scope_adherence(receipts), (3, 4))
 
     def test_scope_denials_counts_only_scope(self):
         with tempfile.TemporaryDirectory(prefix="ma-ct-") as tmp:

@@ -1,7 +1,9 @@
+import json
 import os
 import tempfile
 import unittest
 
+from mini_aurion.contract import TaskContract
 from mini_aurion.fixture import ESCALATE_TEXT, FakeModel, FakeTools
 from mini_aurion.ledger import Ledger
 from mini_aurion.receipts import ReceiptStore
@@ -153,6 +155,29 @@ class SpecialistTests(unittest.TestCase):
              {"text": ESCALATE_TEXT}],
             {})
         self.assertTrue(msg.escalated)
+
+    def test_scope_denial_is_fed_back_not_fatal(self):
+        scope = TaskContract(contract_id="t", version=1, goal="g",
+                             deliverable="d",
+                             in_scope_paths=("mini_aurion/ledger.py",))
+        registry = ToolRegistry()
+        registry.register("read_file", "READ", 0,
+                          FakeTools({"read_file": "v"}))
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="trusted", task_id="t1",
+                            agent_id="spec", scope=scope)
+        model = FakeModel(
+            [{"text": "", "tool_calls": [
+                {"tool": "read_file", "args": {"path": "tests/x.py"}}]},
+             {"text": "answered",
+              "evidence": [{"kind": "file", "ref": "a"}]}])
+        spec = Specialist("spec", model, tools, model_estimate_nano=0)
+        msg = spec.investigate("t1", "brief")
+        self.assertFalse(msg.escalated)
+        self.assertEqual(msg.claim, "answered")
+        shown = json.dumps(model.seen[1])
+        self.assertIn("SCOPE_EXCLUDED", shown)
+        self.assertIn("mini_aurion/ledger.py", shown)
 
     def test_approval_need_escalates_with_reason(self):
         registry = ToolRegistry()

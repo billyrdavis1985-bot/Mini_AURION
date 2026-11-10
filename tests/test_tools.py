@@ -94,6 +94,7 @@ class ToolWrapperTests(unittest.TestCase):
         with self.assertRaises(ToolDenied) as ctx:
             tools.call("read", {"path": "other/b.md"})
         self.assertEqual(ctx.exception.code, "SCOPE_EXCLUDED")
+        self.assertIn("docs/", str(ctx.exception))
         with self.assertRaises(ToolDenied):
             tools.call("read", {"path": "../escape.md"})
         denied = [r for r in self.receipts.read_all()
