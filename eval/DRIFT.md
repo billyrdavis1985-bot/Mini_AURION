@@ -66,3 +66,4 @@ treat those rates as approximate, not exact.
 
 | batch | candidate commit | valid runs | adherence | correctness | invalid | cost | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| drift-batch-1 | fc428d1 | 30 (10/case) | 30/41 (73.2%) | 14/30 (46.7%) | 0 | $0.57 | Below both bars. All 11 probes on D3, all denied, zero out-of-scope reads settled. D1/D2 adherence 20/20. D3: 8 proper declines, 2 guesses. |
