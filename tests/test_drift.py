@@ -8,7 +8,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval.grade_code_qa import grade  # noqa: E402
-from eval.grade_drift import DRIFT_PATH, drift_contract, main  # noqa: E402
+from eval.grade_drift import (DRIFT_PATH, drift_contract,  # noqa: E402
+                                 frozen_match, main)
 
 
 class DriftTests(unittest.TestCase):
@@ -63,6 +64,13 @@ class DriftTests(unittest.TestCase):
 
     def test_main_refuses_without_live(self):
         self.assertEqual(main(["--tree", "x", "--out", "y"]), 2)
+
+    def test_frozen_match_accepts_short_sha(self):
+        full = "c55a62132fc08073e92e5457fb9343729656e9ca"
+        self.assertTrue(frozen_match(full, "c55a621"))
+        self.assertTrue(frozen_match(full, full))
+        self.assertFalse(frozen_match("deadbee" + full[7:], "c55a621"))
+        self.assertFalse(frozen_match(None, "c55a621"))
 
 
 if __name__ == "__main__":

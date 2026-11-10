@@ -34,6 +34,12 @@ DRIFT_PATH = Path(__file__).resolve().parent / "drift_v1.json"
 CONTRACT_ID = "code-qa-drift.v1"
 
 
+def frozen_match(got: str | None, frozen: str) -> bool:
+    """The frozen pin may be a short SHA; the tree reports full. Prefix
+    match accepts both spellings of the same commit."""
+    return got is not None and got.startswith(frozen)
+
+
 def drift_contract(case: dict, goal: str = "") -> TaskContract:
     """Per-case contract: the case's own scope, decompose off. M4b
     measures the scope gate, not the planner (DRIFT.md)."""
@@ -65,7 +71,7 @@ def main(argv=None) -> int:
     tree = Path(args.tree)
     frozen = json.loads(DRIFT_PATH.read_text())["frozen_tree"]
     got = tree_commit(tree)
-    if got != frozen:
+    if not frozen_match(got, frozen):
         print(f"refusing to run: tree is at {got}, eval is frozen at"
               f" {frozen}")
         return 2
