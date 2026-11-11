@@ -333,8 +333,13 @@ def eval_ledger_path(eval_dir: Path) -> Path:
     return _fresh_dir(eval_dir / "ledger.sqlite3")
 
 
+EXACTNESS_NOTE = ("\n\nName exact identifiers as written in the code "
+                   "(Class.function); cite the definition line.")
+
+
 def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
-             ledger: Ledger, template, scope_note: str = "") -> dict:
+             ledger: Ledger, template, scope_note: str = "",
+             exactness_note: str = "") -> dict:
     question = case["question"]
     state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -359,7 +364,7 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
                         "properties": {"path": {"type": "string"}}})
         model = MuseModel(MuseConfig.from_env())
         estimate = model.worst_case_nano([{"role": "brief", "text": question}])
-        brief = (question + scope_note
+        brief = (question + scope_note + exactness_note
                  + "\n\nTop-level layout of the repo you are"
                  " searching (orient yourself, then read the file most"
                  " likely to hold the answer):\n" + reader.layout())
@@ -472,7 +477,8 @@ def main(argv=None) -> int:
             task_id = f"{case['id']}-r{n + 1}"
             state = eval_dir / task_id
             result = run_live(case, task_id, tree, state, ledger,
-                              template)
+                              template,
+                              exactness_note=EXACTNESS_NOTE)
             ok, reasons = grade(case, result, tree)
             valid = result.get("cause", "model") not in INVALID_CAUSES
             passes += ok
