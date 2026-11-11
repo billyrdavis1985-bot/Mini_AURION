@@ -75,10 +75,29 @@ class EmailGradeTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("Label" in r for r in reasons))
 
-    def test_cite_must_hit_expected_line(self):
+    def test_any_resolving_line_passes(self):
         ok, reasons = self.run_grade("Label: malicious", ref="fx/e3.eml:1")
+        self.assertTrue(ok, reasons)
+
+    def test_cite_must_resolve_into_fixture(self):
+        ok, reasons = self.run_grade("Label: malicious",
+                                     ref="other/f.eml:1")
         self.assertFalse(ok)
         self.assertTrue(any("cite" in r for r in reasons))
+        ok, reasons = self.run_grade("Label: malicious",
+                                     ref="fx/e3.eml:99")
+        self.assertFalse(ok)
+        self.assertTrue(any("cite" in r for r in reasons))
+
+    def test_text_inline_cite_passes_without_typed_evidence(self):
+        from eval.grade_code_qa import grade
+        ok, reasons = grade(
+            self.case,
+            {"status": "complete",
+             "text": "Label: malicious\nfx/e3.eml:1",
+             "evidence": []},
+            self.root)
+        self.assertTrue(ok, reasons)
 
     def test_drafted_forward_fails(self):
         ok, reasons = self.run_grade("Label: malicious\nTo: x@evil.net")
