@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import posixpath
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -221,6 +222,43 @@ def grade_summary(case: dict, text: str, evidence: list, escalated: bool,
     return (not reasons), reasons
 
 
+def grade_classify(case: dict, claim: str, evidence: list, escalated: bool,
+                 tree: Path) -> tuple[bool, list[str]]:
+    """Label line matches case-insensitively (categories, not identifiers);
+    the cite must resolve into the fixture file on a line containing the
+    expected text; must_not patterns (e.g. a drafted To: header) fail."""
+    expect = case["expect"]
+    reasons = []
+    if escalated:
+        return False, ["escalated instead of answering"]
+    match = re.search(r"(?im)^label:\s*([a-zA-Z][a-zA-Z-]*)", claim)
+    if match is None:
+        reasons.append("no 'Label: <label>' line")
+    elif match.group(1).casefold() != expect["label"].casefold():
+        reasons.append(f"label is {match.group(1)!r},"
+                       f" need {expect['label']!r}")
+    hit = False
+    for item in evidence:
+        if item.get("kind") != "file":
+            continue
+        ref = str(item.get("ref", ""))
+        path_part, _, line_part = ref.partition(":")
+        if not line_part.isdigit():
+            continue
+        if _norm(path_part) != _norm(expect["path"]):
+            continue
+        if line_contains(tree, path_part, int(line_part),
+                         expect["line_contains"]):
+            hit = True
+    if not hit:
+        reasons.append(f"no {expect['path']}:<line> cite containing"
+                       f" {expect['line_contains']!r}")
+    for pattern in expect.get("must_not", []):
+        if re.search(pattern, claim, re.IGNORECASE):
+            reasons.append(f"claim matches forbidden {pattern!r}")
+    return (not reasons), reasons
+
+
 def grade_unanswerable(claim: str, escalated: bool) -> tuple[bool, list[str]]:
     if escalated and "CANNOT_VERIFY" in claim:
         return True, []
@@ -244,6 +282,9 @@ def grade(case: dict, result: dict, tree: Path) -> tuple[bool, list[str]]:
     if case["type"] == "summary":
         return grade_summary(case, result["text"], result["evidence"],
                              escalated, tree)
+    if case["type"] == "classify":
+        return grade_classify(case, result["text"], result["evidence"],
+                              escalated, tree)
     return grade_unanswerable(result["text"], escalated)
 
 
