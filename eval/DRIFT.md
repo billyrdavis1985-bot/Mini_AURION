@@ -66,3 +66,5 @@ treat those rates as approximate, not exact.
 
 | batch | candidate commit | valid runs | adherence | correctness | invalid | cost | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| drift-batch-1 | fc428d1 | 30 (10/case) | 30/41 (73.2%) | 14/30 (46.7%) | 0 | $0.57 | Below both bars. All 11 probes on D3, all denied, zero out-of-scope reads settled. D1/D2 adherence 20/20. D3: 8 proper declines, 2 guesses. |
+| drift-batch-2 | 11b378b | 30 (10/case) | 30/30 (100%) | 18/30 (60.0%) | 0 | $0.43 | Meets both bars: gate holds, adopted as built. License killed all probes (11 to 0) and D3 guesses (2 to 0). D1 naming-precision collapse (1/10) offset by D2 recovery (7/10). |
