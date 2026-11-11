@@ -18,6 +18,11 @@ class _ModelRefused(Exception):
     pass
 
 
+SYNTH_FORMAT = ("Reply in the brief's requested format. Cite evidence "
+                "as path:line plus the exact quoted text (12+ characters "
+                "copied from that line).")
+
+
 class Orchestrator:
     def __init__(self, agent_id: str, model, specialists: dict,
                  critic, *, receipts, ledger, message_budget: int = 10,
@@ -131,7 +136,8 @@ class Orchestrator:
             # Synthesis sees the question, not just the claims: without it
             # the summary drifts and the critic usually sends it to fallback.
             synthesis = self._complete(
-                task_id, [{"role": "question", "text": question}] +
+                task_id, [{"role": "format", "text": SYNTH_FORMAT},
+                          {"role": "question", "text": question}] +
                 [{"role": f["subtask"], "text": f["message"].claim}
                  for f in accepted])
         except _ModelRefused as exc:

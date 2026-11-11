@@ -20,7 +20,7 @@ import os
 import tempfile
 
 BIG = 10 ** 12
-PINNED_PROMPT_DIGEST = "ebb51edc6f66f03c409d5f084c654062bb56007fb2f5358b8405451f4820c947"
+PINNED_PROMPT_DIGEST = "d31c55664872f0a9a8749f25149221261c9f7d76fbe20e43d092d50a7645b80f"
 
 
 class ScriptedHandler(http.server.BaseHTTPRequestHandler):
@@ -210,7 +210,7 @@ class MuseTests(unittest.TestCase):
             (muse_mod.PROMPT_VERSION + "\n"
              + muse_mod.SYSTEM_PROMPT).encode("utf-8")).hexdigest()
         self.assertEqual(muse_mod.PROMPT_VERSION,
-                         "m0.mini-aurion-investigator.v2")
+                         "m0.mini-aurion-investigator.v3")
         self.assertEqual(digest, PINNED_PROMPT_DIGEST)
 
     def test_model_crash_escalates_with_task_end(self):

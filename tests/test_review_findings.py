@@ -158,7 +158,8 @@ class MemoryFindings(_Tmp):
         after verification leaves the entry 'verified'."""
         path = os.path.join(self.root, "ev.txt")
         open(path, "w").write("supports the claim")
-        e = self.mem.write("agent-a", "z", [{"kind": "file", "ref": "ev.txt"}])
+        e = self.mem.write("agent-a", "z", [{"kind": "file",
+ "ref": "ev.txt:1", "quote": "supports the claim"}])
         self.mem.verify(e["id"], "agent-b")
         open(path, "w").write("says the opposite")
         verified = [x["id"] for x in self.mem.recall()]
@@ -237,7 +238,8 @@ class AgentLoopFindings(_Tmp):
                           daily_cap_nano=100_000, global_cap_nano=100_000)
         self.mem = Memory(self.p("m.db"), file_root=self.root,
                           receipt_store=self.rs)
-        open(os.path.join(self.root, "a.txt"), "w").write("real")
+        open(os.path.join(self.root, "a.txt"), "w").write(
+            "real file content here")
         self.backend = _CostlyTools({"delete_everything": "DELETED"})
 
     def tearDown(self):
@@ -327,7 +329,8 @@ class AgentLoopFindings(_Tmp):
     def test_A6_the_message_budget_is_per_task(self):
         """messages_used is set once in __init__ and never reset, so a
         second task on the same orchestrator starts with a spent budget."""
-        ok = {"text": "fine", "evidence": [{"kind": "file", "ref": "a.txt"}]}
+        ok = {"text": "fine", "evidence": [{"kind": "file",
+ "ref": "a.txt:1", "quote": "real file content"}]}
         three = {"text": "p", "subtasks": [
             {"id": f"s{i}", "brief": "b", "specialist": "spec"}
             for i in range(3)]}
@@ -338,7 +341,8 @@ class AgentLoopFindings(_Tmp):
             self.rs.settle(begun["seq"], 0)
         spec = Specialist("spec", FakeModel([ok] * 10), self.wrapper("trusted"),
                           model_estimate_nano=0)
-        synth = {"text": "s", "evidence": [{"kind": "file", "ref": "a.txt"}]}
+        synth = {"text": "s", "evidence": [{"kind": "file",
+ "ref": "a.txt:1", "quote": "real file content"}]}
         orc = Orchestrator("orc", FakeModel([three, synth] * 2),
                            {"spec": spec},
                            Critic("critic", self.mem, receipts=self.rs),

@@ -27,21 +27,58 @@ class MemoryTests(unittest.TestCase):
 
     def test_real_citations_pass(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"},
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"},
                                 {"kind": "receipt", "ref": self.rcpt["seq"]},
                                 {"kind": "url", "ref": "https://example.com/x"}])
         self.assertEqual(entry["status"], "unverified")
         self.assertEqual(entry["reason"], "")
 
+    def test_quote_must_match_its_line(self):
+        good = {"kind": "file", "ref": "paper.txt:1",
+                "quote": "real content"}
+        self.assertEqual(
+            self.mem.write("s", "c", [good])["reason"], "")
+        bad = dict(good, quote="something else entirely")
+        self.assertIn("quote not on its cited line",
+                      self.mem.write("s", "c", [bad])["reason"])
+        short = dict(good, quote="real")
+        self.assertIn("12+ char quote",
+                      self.mem.write("s", "c", [short])["reason"])
+        long = dict(good, quote="x" * 201)
+        self.assertIn("over 200 chars",
+                      self.mem.write("s", "c", [long])["reason"])
+        bare = {"kind": "file", "ref": "paper.txt:1"}
+        self.assertIn("12+ char quote",
+                      self.mem.write("s", "c", [bare])["reason"])
+        anchored = {"kind": "file", "ref": "paper.txt"}
+        self.assertIn("line anchor",
+                      self.mem.write("s", "c", [anchored])["reason"])
+        far = dict(good, ref="paper.txt:9")
+        self.assertIn("out of range",
+                      self.mem.write("s", "c", [far])["reason"])
+
+    def test_quote_ignores_indent_not_case(self):
+        with open(os.path.join(self.root, "ind.py"), "w") as fh:
+            fh.write('    def GetThingNow():\n')
+        indented = {"kind": "file", "ref": "ind.py:1",
+                    "quote": "def GetThingNow():"}
+        self.assertEqual(
+            self.mem.write("s", "c", [indented])["reason"], "")
+        recased = dict(indented, quote="def getthingnow():")
+        self.assertIn("quote not on its cited line",
+                      self.mem.write("s", "c", [recased])["reason"])
+
     def test_fabricated_file_is_caught(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "nope.txt"}])
+                               [{"kind": "file", "ref": "nope.txt:1"}])
         self.assertEqual(entry["status"], "unverified")
         self.assertIn("not found", entry["reason"])
 
     def test_line_anchored_ref_resolves(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt:1"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         self.assertEqual(entry["reason"], "")
 
     def test_bad_line_anchor_is_caught(self):
@@ -51,7 +88,7 @@ class MemoryTests(unittest.TestCase):
 
     def test_path_escape_is_caught(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "../m.sqlite3"}])
+                               [{"kind": "file", "ref": "../m.sqlite3:1"}])
         self.assertIn("escapes root", entry["reason"])
 
     def test_fabricated_receipt_is_caught(self):
@@ -78,7 +115,8 @@ class MemoryTests(unittest.TestCase):
 
     def test_other_agent_can_verify(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         verified = self.mem.verify(entry["id"], "critic")
         self.assertEqual(verified["status"], "verified")
         self.assertEqual(verified["verified_by"], "critic")
@@ -89,7 +127,8 @@ class MemoryTests(unittest.TestCase):
                      mechanical_checks=frozenset({"citation-resolve"}))
         try:
             entry = mem.write("spec", "claim",
-                              [{"kind": "file", "ref": "paper.txt"}])
+                              [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
             verified = mem.verify(entry["id"], "citation-resolve",
                                   mechanical=True)
             self.assertEqual(verified["status"], "verified")
@@ -98,21 +137,24 @@ class MemoryTests(unittest.TestCase):
 
     def test_unregistered_mechanical_check_is_refused(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         with self.assertRaises(MemoryError) as ctx:
             self.mem.verify(entry["id"], "citation-resolve", mechanical=True)
         self.assertEqual(ctx.exception.code, "UNREGISTERED_CHECK")
 
     def test_mechanical_prefix_without_flag_is_refused(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         with self.assertRaises(MemoryError) as ctx:
             self.mem.verify(entry["id"], "mechanical:spec")
         self.assertEqual(ctx.exception.code, "MECHANICAL_SPOOF")
 
     def test_self_verify_is_refused(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         with self.assertRaises(MemoryError) as ctx:
             self.mem.verify(entry["id"], "spec")
         self.assertEqual(ctx.exception.code, "SELF_VERIFY")
@@ -120,7 +162,8 @@ class MemoryTests(unittest.TestCase):
 
     def test_stale_evidence_at_verify_marks_disputed(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         os.unlink(os.path.join(self.root, "paper.txt"))
         with self.assertRaises(MemoryError) as ctx:
             self.mem.verify(entry["id"], "critic")
@@ -129,26 +172,31 @@ class MemoryTests(unittest.TestCase):
 
     def test_disputed_entries_are_quarantined_from_recall(self):
         entry = self.mem.write("spec", "claim",
-                               [{"kind": "file", "ref": "paper.txt"}])
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         self.mem.dispute(entry["id"], "critic", "wrong")
         self.assertEqual(self.mem.recall(), [])
         self.assertEqual(self.mem.recall(include_unverified=True), [])
 
     def test_recall_defaults_to_verified_only(self):
         self.mem.write("spec", "unverified claim",
-                       [{"kind": "file", "ref": "paper.txt"}])
+                       [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         good = self.mem.write("spec", "good claim",
-                              [{"kind": "file", "ref": "paper.txt"}])
+                              [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}])
         self.mem.verify(good["id"], "critic")
         self.assertEqual([e["id"] for e in self.mem.recall()], [good["id"]])
         self.assertEqual(len(self.mem.recall(include_unverified=True)), 2)
 
     def test_expiry_flags_dependents(self):
         parent = self.mem.write("spec", "parent",
-                                [{"kind": "file", "ref": "paper.txt"}],
+                                [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}],
                                 ttl_seconds=1)
         child = self.mem.write("spec", "child",
-                               [{"kind": "file", "ref": "paper.txt"}],
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}],
                                derived_from=[parent["id"]])
         self.assertEqual(child["status"], "unverified")
         result = self.mem.expire_sweep(now=time.time() + 100)
@@ -159,18 +207,21 @@ class MemoryTests(unittest.TestCase):
 
     def test_deriving_from_expired_parent_flags_immediately(self):
         parent = self.mem.write("spec", "parent",
-                                [{"kind": "file", "ref": "paper.txt"}],
+                                [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}],
                                 ttl_seconds=1)
         self.mem.expire_sweep(now=time.time() + 100)
         child = self.mem.write("spec", "child",
-                               [{"kind": "file", "ref": "paper.txt"}],
+                               [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}],
                                derived_from=[parent["id"]])
         self.assertEqual(child["status"], "derived-unverified")
 
     def test_unknown_parent_is_refused(self):
         with self.assertRaises(MemoryError) as ctx:
             self.mem.write("spec", "child",
-                           [{"kind": "file", "ref": "paper.txt"}],
+                           [{"kind": "file", "ref": "paper.txt:1",
+                               "quote": "real content"}],
                            derived_from=["mem_nope"])
         self.assertEqual(ctx.exception.code, "UNKNOWN_ENTRY")
 

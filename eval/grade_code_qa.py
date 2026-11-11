@@ -31,7 +31,8 @@ from mini_aurion.critic import Critic  # noqa: E402
 from mini_aurion.ledger import Ledger  # noqa: E402
 from mini_aurion.memory import Memory  # noqa: E402
 from mini_aurion.muse import (MuseConfig, MuseError, MuseModel,  # noqa: E402
-                                 PLANNER_PROMPT, RELEVANCE_PROMPT)
+                                 PLANNER_PROMPT, RELEVANCE_PROMPT,
+                                 SYSTEM_PROMPT)
 from mini_aurion.contract import load_contract, scope_denials  # noqa: E402
 from mini_aurion.orchestrator import Orchestrator  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
@@ -337,9 +338,13 @@ EXACTNESS_NOTE = ("\n\nName exact identifiers as written in the code "
                    "(Class.function); cite the definition line.")
 
 
+QUOTE_NOTE = ("\n\nCite every file as path:line plus the exact quoted "
+              "text (12+ characters copied from that line).")
+
+
 def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger, template, scope_note: str = "",
-             exactness_note: str = "") -> dict:
+             exactness_note: str = "", quote_note: str = "") -> dict:
     question = case["question"]
     state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -364,7 +369,7 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
                         "properties": {"path": {"type": "string"}}})
         model = MuseModel(MuseConfig.from_env())
         estimate = model.worst_case_nano([{"role": "brief", "text": question}])
-        brief = (question + scope_note + exactness_note
+        brief = (question + scope_note + exactness_note + quote_note
                  + "\n\nTop-level layout of the repo you are"
                  " searching (orient yourself, then read the file most"
                  " likely to hold the answer):\n" + reader.layout())
@@ -373,7 +378,8 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
                             stage="experimental", task_id=task_id,
                             agent_id="spec", scope=contract)
         spec = Specialist("spec", model, tools,
-                          model_estimate_nano=estimate)
+                          model_estimate_nano=estimate,
+                          investigator_prompt=SYSTEM_PROMPT)
 
         def grade_check(candidate):
             ok, _ = grade(case, {"status": candidate["status"],
@@ -478,7 +484,8 @@ def main(argv=None) -> int:
             state = eval_dir / task_id
             result = run_live(case, task_id, tree, state, ledger,
                               template,
-                              exactness_note=EXACTNESS_NOTE)
+                              exactness_note=EXACTNESS_NOTE,
+                              quote_note=QUOTE_NOTE)
             ok, reasons = grade(case, result, tree)
             valid = result.get("cause", "model") not in INVALID_CAUSES
             passes += ok

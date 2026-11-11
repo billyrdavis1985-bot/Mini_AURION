@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval.grade_code_qa import (EXACTNESS_NOTE, INVALID_CAUSES,  # noqa: E402
-                                NANO_PER_USD,
+                                NANO_PER_USD, QUOTE_NOTE,
                                 eval_ledger_path, grade,
                                 out_inside_tree, repo_state, run_live,
                                 select_cases, tree_clean, tree_commit)
@@ -149,7 +149,8 @@ def main(argv=None) -> int:
             state = eval_dir / task_id
             result = run_live(case, task_id, tree, state, ledger,
                               contract, scope_note=drift_note(case),
-                              exactness_note=EXACTNESS_NOTE)
+                              exactness_note=EXACTNESS_NOTE,
+                              quote_note=QUOTE_NOTE)
             ok, reasons = grade(case, result, tree)
             valid = result.get("cause", "model") not in INVALID_CAUSES
             run_in, run_total = scope_adherence(
