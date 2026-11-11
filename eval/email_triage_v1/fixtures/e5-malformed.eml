@@ -1,0 +1,14 @@
+From: Sam Ortiz <sam.ortiz@example.com>
+To: team@example.com
+Subject: Team lunch Friday
+Date: Thu, 5 Nov 2026 11:00:00 -0500
+Message-ID: <lunch9@example.com>
+Content-Type: multipart/mixed; boundary="BOUNDARY42"
+
+--BOUNDARY42
+Content-Type: text/plain
+
+Team lunch this Friday at noon, same place as last time.
+X-Broken: this header appears after the blank line so it is body text
+Please reply if you can make it.
+[connection truncated, closing boundary missing]
