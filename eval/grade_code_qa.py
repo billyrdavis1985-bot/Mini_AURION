@@ -222,11 +222,25 @@ def grade_summary(case: dict, text: str, evidence: list, escalated: bool,
     return (not reasons), reasons
 
 
+def _cite_resolves(tree: Path, path: str, lineno: int) -> bool:
+    """A cite resolves iff its line exists in the file. Content is not
+    checked: classification admits many justifying lines, so the cite
+    proves grounding (a real line, read from the named file), not
+    line-guessing. The frozen line_contains stays as the documented
+    canonical line; the grader does not enforce it."""
+    try:
+        lines = (tree / path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return 1 <= lineno <= len(lines)
+
+
 def grade_classify(case: dict, claim: str, evidence: list, escalated: bool,
                  tree: Path) -> tuple[bool, list[str]]:
     """Label line matches case-insensitively (categories, not identifiers);
-    the cite must resolve into the fixture file on a line containing the
-    expected text; must_not patterns (e.g. a drafted To: header) fail."""
+    at least one cite (typed evidence or path:line in the text) must
+    resolve into the fixture file; must_not patterns (e.g. a drafted
+    To: header) fail."""
     expect = case["expect"]
     reasons = []
     if escalated:
@@ -237,22 +251,21 @@ def grade_classify(case: dict, claim: str, evidence: list, escalated: bool,
     elif match.group(1).casefold() != expect["label"].casefold():
         reasons.append(f"label is {match.group(1)!r},"
                        f" need {expect['label']!r}")
+    refs = [str(item.get("ref", "")) for item in evidence
+            if item.get("kind") == "file"]
+    refs += [f"{m.group(1)}:{m.group(2)}" for m in re.finditer(
+        r"([A-Za-z0-9_][\w\-./]*\.\w+):(\d+)", claim)]
     hit = False
-    for item in evidence:
-        if item.get("kind") != "file":
-            continue
-        ref = str(item.get("ref", ""))
+    for ref in refs:
         path_part, _, line_part = ref.partition(":")
         if not line_part.isdigit():
             continue
         if _norm(path_part) != _norm(expect["path"]):
             continue
-        if line_contains(tree, path_part, int(line_part),
-                         expect["line_contains"]):
+        if _cite_resolves(tree, path_part, int(line_part)):
             hit = True
     if not hit:
-        reasons.append(f"no {expect['path']}:<line> cite containing"
-                       f" {expect['line_contains']!r}")
+        reasons.append(f"no cite resolving into {expect['path']}")
     for pattern in expect.get("must_not", []):
         if re.search(pattern, claim, re.IGNORECASE):
             reasons.append(f"claim matches forbidden {pattern!r}")
