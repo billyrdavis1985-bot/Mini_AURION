@@ -1,0 +1,135 @@
+{
+    "set": "code-qa.v2",
+    "frozen_commit": "f4f5296387f6292f309a6979a5946f92292cde3a",
+    "cases": [
+        {
+            "id": "v2-escalate-builder",
+            "type": "code",
+            "question": "Which function builds the specialist's escalated result, and what marker starts its claim? Cite path:line.",
+            "expect": {
+                "function": "Specialist._escalated",
+                "path": "mini_aurion/specialist.py",
+                "line_contains": "def _escalated(",
+                "must_mention": [
+                    "ESCALATE_TEXT"
+                ]
+            }
+        },
+        {
+            "id": "v2-judge-unparseable",
+            "type": "code",
+            "question": "When the relevance judge's reply is unparseable, is the finding kept? Name the function and cite.",
+            "expect": {
+                "function": "Orchestrator._judge",
+                "path": "mini_aurion/orchestrator.py",
+                "line_contains": "def _judge(",
+                "must_mention": [
+                    "False"
+                ]
+            }
+        },
+        {
+            "id": "v2-critic-unread",
+            "type": "code",
+            "question": "What verdict does the critic give a claim citing a file never read in the task? Name the function and cite.",
+            "expect": {
+                "function": "Critic.check",
+                "path": "mini_aurion/critic.py",
+                "line_contains": "def check(",
+                "must_mention": [
+                    "fail"
+                ]
+            }
+        },
+        {
+            "id": "v2-ledger-overrun",
+            "type": "code",
+            "question": "When actual cost exceeds the estimate at settle time, what does the function return? Name it and cite.",
+            "expect": {
+                "function": "Ledger.settle",
+                "path": "mini_aurion/ledger.py",
+                "line_contains": "def settle(",
+                "must_mention": [
+                    "True"
+                ]
+            }
+        },
+        {
+            "id": "v2-scope-adherence",
+            "type": "code",
+            "question": "How is scope adherence computed: which receipt actions count on each side? Name the function and cite.",
+            "expect": {
+                "function": "scope_adherence",
+                "path": "mini_aurion/contract.py",
+                "line_contains": "def scope_adherence(",
+                "must_mention": [
+                    "tool_call"
+                ]
+            }
+        },
+        {
+            "id": "v2-redirect-refused",
+            "type": "code",
+            "question": "What does the Muse adapter do when the API answers with a redirect? Name the function and cite.",
+            "expect": {
+                "function": "redirect_request",
+                "path": "mini_aurion/muse.py",
+                "line_contains": "def redirect_request(",
+                "must_mention": [
+                    "REDIRECT_REFUSED"
+                ]
+            }
+        },
+        {
+            "id": "v2-sum-receipts",
+            "type": "summary",
+            "question": "Summarize the receipt rules as one bullet per rule.",
+            "expect": {
+                "bullets": 5,
+                "path": "OPERATIONS.md",
+                "span": [
+                    65,
+                    75
+                ]
+            }
+        },
+        {
+            "id": "v2-sum-hostile",
+            "type": "summary",
+            "question": "Summarize the hostile-input rules as one bullet per rule.",
+            "expect": {
+                "bullets": 3,
+                "path": "OPERATIONS.md",
+                "span": [
+                    135,
+                    141
+                ]
+            }
+        },
+        {
+            "id": "v2-no-newsletter",
+            "type": "unanswerable",
+            "question": "Which function sends the weekly status newsletter? Cite path:line.",
+            "expect": {
+                "escalated": true,
+                "absent": "newsletter",
+                "except": [
+                    "eval/BASELINE.md",
+                    "eval/code_qa_v1.json",
+                    "tests/test_eval_grade.py",
+                    "tests/test_review_findings_m3_eval.py"
+                ]
+            }
+        },
+        {
+            "id": "v2-no-prune",
+            "type": "unanswerable",
+            "question": "Which function prunes old receipts from the store? Cite path:line.",
+            "expect": {
+                "escalated": true,
+                "absent": "prune",
+                "except": []
+            }
+        }
+    ]
+}
