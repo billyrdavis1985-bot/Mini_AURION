@@ -8,8 +8,12 @@ Network): an orchestrated multi-LLM system for real-world problems. This repo
 is the lighter build-and-test version. If it works, it helps build the full
 system.
 
-**Status: Milestone 3** — live adapter + frozen Code-QA eval set
-(code-qa.v1, 5 cases, script-graded). Operator's keyed runs pending.
+**Status: recalibrated 2026-11-12.** The governance layer (receipts,
+ledger, policy, contracts, scope gate) is built and measured. The tiered,
+multi-model, research and collaboration commitments are not yet started.
+[VISION.md](VISION.md) holds the commitment table and the build order
+(tiers first); [EXPERIMENTS.md](EXPERIMENTS.md) holds the findings. The
+repo is a testbed for AURION and for PRAXIS.
 
 ## Rules
 
@@ -47,6 +51,11 @@ No API key, no network, no spend. All Milestone 0 tests run on fixtures.
 | `eval/` | frozen Code-QA set + script grader (live runs on operator PC) |
 | `tests/` | suite over disposable state |
 | `OPERATIONS.md` | operating constitution |
+| `VISION.md` | commitments, statuses, build order; a gate, not a description |
+| `EXPERIMENTS.md` | findings, with cost in dollars and seconds |
+| `docs/adr/` | architecture decision records |
+| `docs/tasks/` | builder task specs, each with its demo |
+| `docs/BACKLOG.md` | non-blocking findings, scheduled by milestone |
 
 ## How it is built
 
