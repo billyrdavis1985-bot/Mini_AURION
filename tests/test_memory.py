@@ -61,13 +61,19 @@ class MemoryTests(unittest.TestCase):
     def test_quote_ignores_indent_not_case(self):
         with open(os.path.join(self.root, "ind.py"), "w") as fh:
             fh.write('    def GetThingNow():\n')
-        indented = {"kind": "file", "ref": "ind.py:1",
-                    "quote": "def GetThingNow():"}
+        bare = {"kind": "file", "ref": "ind.py:1",
+                "quote": "def GetThingNow():"}
         self.assertEqual(
-            self.mem.write("s", "c", [indented])["reason"], "")
-        recased = dict(indented, quote="def getthingnow():")
+            self.mem.write("s", "c", [bare])["reason"], "")
+        verbatim = dict(bare, quote="    def GetThingNow():")
+        self.assertEqual(
+            self.mem.write("s", "c", [verbatim])["reason"], "")
+        recased = dict(bare, quote="def getthingnow():")
         self.assertIn("quote not on its cited line",
                       self.mem.write("s", "c", [recased])["reason"])
+        blank = dict(bare, quote=" " * 12)
+        self.assertIn("quote not on its cited line",
+                      self.mem.write("s", "c", [blank])["reason"])
 
     def test_fabricated_file_is_caught(self):
         entry = self.mem.write("spec", "claim",

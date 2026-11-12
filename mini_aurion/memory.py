@@ -103,7 +103,10 @@ class Memory:
                     encoding="utf-8").splitlines()[int(line_part) - 1]
             except (IndexError, OSError):
                 return f"cited line out of range: {ref!r}"
-            if quote not in line.strip():
+            # Both sides stripped: a model copying the line verbatim
+            # keeps its indentation, and that must pass. Stripping only
+            # the line rejects exact copies (measured live).
+            if not quote.strip() or quote.strip() not in line.strip():
                 return f"quote not on its cited line: {ref!r}"
             return None
         if kind == "receipt":
