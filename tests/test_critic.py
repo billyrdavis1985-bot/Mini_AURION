@@ -14,9 +14,9 @@ class CriticTests(unittest.TestCase):
         self.root = os.path.join(self.tmp.name, "corpus")
         os.mkdir(self.root)
         with open(os.path.join(self.root, "a.txt"), "w") as fh:
-            fh.write("real")
+            fh.write("real file content here")
         with open(os.path.join(self.root, "other.txt"), "w") as fh:
-            fh.write("also real")
+            fh.write("also real content here")
         self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
         self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
                           file_root=self.root,
@@ -41,27 +41,31 @@ class CriticTests(unittest.TestCase):
     def test_sound_citations_pass(self):
         self.seed_read("a.txt")
         result = self.critic.check(self.msg(
-            evidence=[{"kind": "file", "ref": "a.txt"},
+            evidence=[{"kind": "file", "ref": "a.txt:1",
+ "quote": "real file content"},
                       {"kind": "url", "ref": "https://example.com/x"}]))
         self.assertEqual(result["verdict"], "pass")
         self.assertEqual(result["catches"], [])
 
     def test_cited_but_unread_file_fails(self):
         result = self.critic.check(self.msg(
-            evidence=[{"kind": "file", "ref": "other.txt"}]))
+            evidence=[{"kind": "file", "ref": "other.txt:1",
+ "quote": "also real content"}]))
         self.assertEqual(result["verdict"], "fail")
         self.assertTrue(any("never read" in c for c in result["catches"]))
 
     def test_spelling_variants_match(self):
         self.seed_read("./a.txt")
         result = self.critic.check(self.msg(
-            evidence=[{"kind": "file", "ref": "a.txt"}]))
+            evidence=[{"kind": "file", "ref": "a.txt:1",
+ "quote": "real file content"}]))
         self.assertEqual(result["verdict"], "pass")
 
     def test_read_in_another_task_does_not_count(self):
         self.seed_read("a.txt", task_id="other-task")
         result = self.critic.check(self.msg(
-            evidence=[{"kind": "file", "ref": "a.txt"}]))
+            evidence=[{"kind": "file", "ref": "a.txt:1",
+ "quote": "real file content"}]))
         self.assertEqual(result["verdict"], "fail")
 
     def test_missing_evidence_fails(self):
@@ -72,7 +76,7 @@ class CriticTests(unittest.TestCase):
 
     def test_fabricated_citation_fails_with_catch(self):
         result = self.critic.check(self.msg(
-            evidence=[{"kind": "file", "ref": "ghost.txt"}]))
+            evidence=[{"kind": "file", "ref": "ghost.txt:1"}]))
         self.assertEqual(result["verdict"], "fail")
         self.assertIn("not found", result["catches"][0])
 

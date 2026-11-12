@@ -161,7 +161,8 @@ class LivePathRegression(_LiveHarness):
         calling read_file. Before #10 this came back 'complete': the critic
         only checked that note.txt existed."""
         invented = say({"claim": "The topic is: an invented sentence",
-                        "evidence": [{"kind": "file", "ref": "note.txt"}]})
+                        "evidence": [{"kind": "file", "ref": "note.txt:1",
+ "quote": "REAL TOPIC SENTENCE"}]})
         _FakeAPI.script = [
             say({"claim": "plan", "subtasks": [
                 {"id": "s1", "brief": "report note.txt",
@@ -183,9 +184,11 @@ class LivePathRegression(_LiveHarness):
                  "specialist": "spec"}]}),
             call_tool("read_file", path="note.txt"),
             say({"claim": "The topic is REAL TOPIC SENTENCE",
-                 "evidence": [{"kind": "file", "ref": "note.txt"}]}),
+                 "evidence": [{"kind": "file", "ref": "note.txt:1",
+ "quote": "REAL TOPIC SENTENCE"}]}),
             say({"claim": "The topic is REAL TOPIC SENTENCE",
-                 "evidence": [{"kind": "file", "ref": "note.txt"}]}),
+                 "evidence": [{"kind": "file", "ref": "note.txt:1",
+ "quote": "REAL TOPIC SENTENCE"}]}),
         ]
         result, _ = self.run_task("Report note.txt's topic. Cite the file.")
         self.assertEqual(result["status"], "complete")
@@ -217,7 +220,8 @@ class ReviewFindingsPR11(_LiveHarness):
         'note.txt' is rejected, and the eval scores it as a model miss.
         Fail-closed, but it measures string spelling, not honesty."""
         honest = say({"claim": "The topic is REAL TOPIC SENTENCE",
-                      "evidence": [{"kind": "file", "ref": "note.txt"}]})
+                      "evidence": [{"kind": "file", "ref": "note.txt:1",
+ "quote": "REAL TOPIC SENTENCE"}]})
         _FakeAPI.script = [
             say({"claim": "plan", "subtasks": [
                 {"id": "s1", "brief": "b", "specialist": "spec"}]}),
@@ -290,6 +294,27 @@ class ReviewFindingsPR11(_LiveHarness):
             if r["action"] == "task_start"]
         self.assertEqual(len(starts), 1)
         self.assertIn("EXACT-MARKER", starts[0]["detail"]["question"])
+
+    def test_quote_note_lands_in_the_brief(self):
+        state = Path(self.dir) / "state" / "qa-x-r1"
+        led = Ledger(os.path.join(self.dir, "eval-l.db"), task_cap_nano=BIG,
+                     daily_cap_nano=BIG, global_cap_nano=BIG)
+        env = {"MODEL_API_KEY": "test-key",
+               "MINI_AURION_MUSE_BASE_URL": self.base_url}
+        try:
+            with mock.patch.dict(os.environ, env):
+                result = grade_code_qa.run_live(
+                    {"id": "qa-x", "type": "unanswerable", "question": "q"},
+                    "qa-x-r1", Path(self.corpus), state, led,
+                    load_contract(grade_code_qa.CONTRACT_PATH, "q"),
+                    quote_note="\n\nQUOTE-MARKER")
+        finally:
+            led.close()
+        starts = [r for r in ReceiptStore(
+            result["receipts_path"]).read_all()
+            if r["action"] == "task_start"]
+        self.assertEqual(len(starts), 1)
+        self.assertIn("QUOTE-MARKER", starts[0]["detail"]["question"])
 
     def test_F3_the_grader_refuses_a_tree_that_is_not_the_frozen_commit(self):
         """main() never checks that --tree is a checkout of frozen_commit.

@@ -23,7 +23,8 @@ MAX_TOOL_CHARS = 12000
 class Specialist:
     def __init__(self, agent_id: str, model, tools, *,
                  max_model_calls: int = 6, max_tool_calls: int = 8,
-                 model_estimate_nano: int):
+                 model_estimate_nano: int,
+                 investigator_prompt: str | None = None):
         """model_estimate_nano is required: 0 asserts the builder knows the
         model is free. Metering is never silently off. Budgets fit
         list-then-read exploration (measured live: 4 tools starve it)."""
@@ -35,6 +36,7 @@ class Specialist:
         self.max_model_calls = max_model_calls
         self.max_tool_calls = max_tool_calls
         self.model_estimate_nano = model_estimate_nano
+        self.investigator_prompt = investigator_prompt
 
     def investigate(self, task_id: str, brief: str) -> AgentMessage:
         self.tools.clear_cache()
@@ -60,7 +62,12 @@ class Specialist:
             converging = tools_out or last_call
             offered = [] if converging \
                 else self.tools.registry.definitions()
-            reply = self.model.complete(messages, tools=offered)
+            if self.investigator_prompt is None:
+                reply = self.model.complete(messages, tools=offered)
+            else:
+                reply = self.model.complete(
+                    messages, tools=offered,
+                    system_prompt=self.investigator_prompt)
             if reservation is not None:
                 actual = getattr(self.model, "last_cost_nano", 0) or 0
                 self.tools.ledger.settle(reservation, actual)

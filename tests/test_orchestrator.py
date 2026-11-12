@@ -15,7 +15,8 @@ from mini_aurion.tools import ToolRegistry, ToolWrapper
 
 CAPS = {"task_cap_nano": 100_000, "daily_cap_nano": 500_000,
         "global_cap_nano": 1_000_000}
-GOOD_EVIDENCE = [{"kind": "file", "ref": "a.txt"}]
+GOOD_EVIDENCE = [{"kind": "file", "ref": "a.txt:1",
+ "quote": "real file content"}]
 
 
 def plan(*subtasks):
@@ -44,7 +45,7 @@ class OrchestratorTests(unittest.TestCase):
         self.root = os.path.join(self.tmp.name, "corpus")
         os.mkdir(self.root)
         with open(os.path.join(self.root, "a.txt"), "w") as fh:
-            fh.write("real")
+            fh.write("real file content here")
         self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
         self.ledger = Ledger(os.path.join(self.tmp.name, "l.sqlite3"), **CAPS)
         self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
@@ -279,6 +280,16 @@ class OrchestratorTests(unittest.TestCase):
         self.assertTrue(any(m.get("role") == "question"
                             and "question?" in m["text"]
                             for m in synth_input))
+
+    def test_synthesis_gets_the_format_note(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]})
+        orc.run("t1", "question?")
+        synth_input = self.last_orc_model.seen[-1]
+        formats = [m for m in synth_input if m.get("role") == "format"]
+        self.assertEqual(len(formats), 1)
+        self.assertIn("quoted text", formats[0]["text"])
 
     def test_critic_verdicts_are_receipted_with_claims(self):
         orc = self.build(

@@ -84,6 +84,8 @@ class Memory:
             path_part, _, line_part = ref.partition(":")
             if line_part and not line_part.isdigit():
                 return f"bad line anchor: {ref!r}"
+            if not line_part.isdigit() or int(line_part) < 1:
+                return f"file cite needs a line anchor: {ref!r}"
             candidate = (self.root / (path_part or ref)).resolve()
             try:
                 candidate.relative_to(self.root)
@@ -91,6 +93,18 @@ class Memory:
                 return f"file escapes root: {ref!r}"
             if not candidate.is_file():
                 return f"file not found: {ref!r}"
+            quote = source.get("quote", "")
+            if not isinstance(quote, str) or len(quote) < 12:
+                return f"file cite needs a 12+ char quote: {ref!r}"
+            if len(quote) > 200:
+                return f"file quote over 200 chars: {ref!r}"
+            try:
+                line = candidate.read_text(
+                    encoding="utf-8").splitlines()[int(line_part) - 1]
+            except (IndexError, OSError):
+                return f"cited line out of range: {ref!r}"
+            if quote not in line.strip():
+                return f"quote not on its cited line: {ref!r}"
             return None
         if kind == "receipt":
             if self.receipts is None:
@@ -234,7 +248,9 @@ class Memory:
         return self.get(entry_id)
 
     def _file_hash(self, ref: str) -> str:
-        path = (self.root / ref).resolve()
+        # Anchored cites hash their file: the anchor locates, the file
+        # is what changed-or-not since verification.
+        path = (self.root / ref.partition(":")[0]).resolve()
         digest = hashlib.sha256()
         with open(path, "rb") as fh:
             for chunk in iter(lambda: fh.read(65536), b""):

@@ -146,10 +146,12 @@ class PartialPrefixEatsTheFirstBullet(_Harness):
         the grader strip a leading 'PARTIAL: '."""
         rule_lines = [110, 112, 114, 117, 120, 122]
         (self.tree / "OPERATIONS.md").write_text(
-            "\n".join(f"line {n}" for n in range(1, 130)) + "\n")
+            "\n".join(f"tier rule {n} filler words here"
+                       for n in range(1, 130)) + "\n")
         claim = "\n".join(f"- rule {i} (OPERATIONS.md:{n})"
                           for i, n in enumerate(rule_lines, 1))
-        evidence = [{"kind": "file", "ref": f"OPERATIONS.md:{n}"}
+        evidence = [{"kind": "file", "ref": f"OPERATIONS.md:{n}",
+                       "quote": f"tier rule {n} filler"}
                     for n in rule_lines]
         case = CASES["qa-tier-summary"]
         # The specialist's answer on its own passes the grader.
@@ -247,20 +249,23 @@ class ReportedCostDropsRetries(_Harness):
 
         Fix: report ledger.spend(task_id)['settled_nano'] in _finish and in
         the error guard, instead of summing messages."""
-        (self.tree / "a.txt").write_text("hello\n")
+        (self.tree / "a.txt").write_text(
+            "hello world from the fixture file\n")
         backend = FakeTools({"read_file": "1: hello", "list_dir": "a.txt"})
         model = FakeModel([
             {"text": "plan"},
             {"text": "", "tool_calls": [
                 {"tool": "read_file", "args": {"path": "a.txt"}}]},
             {"text": "claim", "evidence": [
-                {"kind": "file", "ref": "missing.txt"}]},  # critic fails
+                {"kind": "file", "ref": "missing.txt:1"}]},  # critic fails
             {"text": "", "tool_calls": [
                 {"tool": "read_file", "args": {"path": "a.txt"}}]},
             {"text": "claim", "evidence": [
-                {"kind": "file", "ref": "a.txt"}]},        # retry passes
+                {"kind": "file", "ref": "a.txt:1",
+ "quote": "hello world from the"}]},        # retry passes
             {"text": "synth", "evidence": [
-                {"kind": "file", "ref": "a.txt"}]},
+                {"kind": "file", "ref": "a.txt:1",
+                 "quote": "hello world from the"}]},
         ])
         led = self.ledger()
         result = self.orchestrator(model, led, backend=backend,

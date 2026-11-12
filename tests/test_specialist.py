@@ -179,6 +179,14 @@ class SpecialistTests(unittest.TestCase):
         self.assertIn("SCOPE_EXCLUDED", shown)
         self.assertIn("mini_aurion/ledger.py", shown)
 
+    def test_investigator_prompt_reaches_the_model(self):
+        spec, model = self._wired([{"text": "done",
+                                    "evidence": [{"kind": "file",
+                                                  "ref": "a"}]}],
+                                   {}, investigator_prompt="SYS")
+        spec.investigate("t1", "brief")
+        self.assertEqual(model.systems, ["SYS"])
+
     def test_approval_need_escalates_with_reason(self):
         registry = ToolRegistry()
         registry.register("w", "WRITE", 0, FakeTools({"w": "v"}))
