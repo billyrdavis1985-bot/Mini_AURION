@@ -18,8 +18,9 @@ operator can see what each tier cost and did.
    speaks the OpenAI chat shape; make base URL, model name, prices and
    key env var per provider so OpenAI, DeepSeek, Meta and a local server
    (vLLM or Ollama, operator's choice) are configuration, not code. Keep
-   https-only and no-redirects for remote hosts; plain http stays
-   loopback-only.
+   https-only and no-redirects for remote hosts; plain http is allowed
+   only for the local provider on loopback or private-LAN hosts, so a
+   typo'd URL can never send a paid key in cleartext off-site.
 3. **Native adapters** for Anthropic and Google, each with a fake-API
    test in the style of `tests/test_muse.py` (no network, no key, $0).
    Fail-closed rules from `muse.py` apply unchanged: unparseable answers

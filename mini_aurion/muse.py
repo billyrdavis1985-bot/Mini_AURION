@@ -21,6 +21,7 @@ import ipaddress
 import json
 import os
 import re
+import typing
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -127,6 +128,27 @@ def _is_loopback(host: str | None) -> bool:
         return False
 
 
+def _is_private_host(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return host.lower() in ("localhost",)
+
+
+def _check_local_base_url(url: str) -> str:
+    try:
+        return _check_base_url(url)
+    except MuseError:
+        pass
+    parts = urlsplit(url)
+    if parts.scheme == "http" and _is_private_host(parts.hostname):
+        return url.rstrip("/")
+    raise MuseError("BAD_URL", "local URL must be loopback, private-LAN"
+                    " http, or https")
+
+
 def _check_base_url(url: str) -> str:
     parts = urlsplit(url)
     if parts.username or parts.password or parts.query or parts.fragment \
@@ -144,6 +166,46 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise MuseError("REDIRECT_REFUSED", "redirects are refused")
 
 
+PROVIDERS = {
+    "openai": {"key_env": "OPENAI_API_KEY",
+               "base_url_env": "MINI_AURION_OPENAI_BASE_URL",
+               "base_url_default": "https://api.openai.com/v1",
+               "model_env": "MINI_AURION_OPENAI_MODEL",
+               "model_default": "",
+               "price_in_env": "MINI_AURION_OPENAI_PRICE_IN",
+               "price_out_env": "MINI_AURION_OPENAI_PRICE_OUT",
+               "price_in_default": "", "price_out_default": ""},
+    "deepseek": {"key_env": "DEEPSEEK_API_KEY",
+                 "base_url_env": "MINI_AURION_DEEPSEEK_BASE_URL",
+                 "base_url_default": "https://api.deepseek.com/v1",
+                 "model_env": "MINI_AURION_DEEPSEEK_MODEL",
+                 "model_default": "",
+                 "price_in_env": "MINI_AURION_DEEPSEEK_PRICE_IN",
+                 "price_out_env": "MINI_AURION_DEEPSEEK_PRICE_OUT",
+                 "price_in_default": "", "price_out_default": ""},
+    "local": {"key_env": None,
+              "base_url_env": "MINI_AURION_LOCAL_BASE_URL",
+              "base_url_default": "http://127.0.0.1:11434/v1",
+              "model_env": "MINI_AURION_LOCAL_MODEL",
+              "model_default": "",
+              "price_in_env": None, "price_out_env": None,
+              "price_in_default": "0", "price_out_default": "0"},
+}
+
+
+class ModelProtocol(typing.Protocol):
+    """One protocol every adapter implements: the harness swaps tiers
+    without knowing which provider answers."""
+    provider: str
+    model: str
+    calls: int
+    last_cost_nano: int
+
+    def complete(self, messages: list, tools: list,
+                 system_prompt: str | None = None) -> dict: ...
+    def worst_case_nano(self, messages: list) -> int: ...
+
+
 @dataclass(frozen=True)
 class MuseConfig:
     api_key: str = field(repr=False)
@@ -157,27 +219,64 @@ class MuseConfig:
     # Investigative answers are modal: the most likely answer, reproducibly.
     # Frozen evals cannot measure a capability that samples at temperature 1.
     temperature: float = 0.0
+    provider: str = "meta"
 
     def __post_init__(self):
-        if not self.api_key:
-            raise MuseError("NO_KEY", f"{API_KEY_ENV_VAR} is not set")
-        _check_base_url(self.base_url)
+        if self.provider != "local" and not self.api_key:
+            raise MuseError("NO_KEY", "no API key configured")
+        if self.provider == "local":
+            _check_local_base_url(self.base_url)
+        else:
+            _check_base_url(self.base_url)
         if self.max_output_tokens <= 0 or self.timeout_seconds <= 0 \
                 or self.max_response_bytes <= 0:
             raise MuseError("BAD_CONFIG", "limits must be positive")
 
     @classmethod
-    def from_env(cls, environ=None, **overrides):
+    def from_env(cls, environ=None, provider="meta", **overrides):
         env = environ if environ is not None else os.environ
-        return cls(api_key=env.get(API_KEY_ENV_VAR, ""),
+        if provider == "meta":
+            return cls(api_key=env.get(API_KEY_ENV_VAR, ""),
+                       base_url=overrides.get(
+                           "base_url",
+                           env.get(BASE_URL_ENV_VAR, DEFAULT_BASE_URL)),
+                       model=overrides.get(
+                           "model", env.get(MODEL_ENV_VAR, DEFAULT_MODEL)),
+                       input_usd_per_m=env.get(
+                           PRICE_INPUT_ENV_VAR, DEFAULT_INPUT_USD_PER_M),
+                       output_usd_per_m=env.get(
+                           PRICE_OUTPUT_ENV_VAR, DEFAULT_OUTPUT_USD_PER_M),
+                       provider="meta")
+        if provider not in PROVIDERS:
+            raise MuseError("BAD_PROVIDER", f"unknown provider {provider!r}")
+        table = PROVIDERS[provider]
+        key_env = table["key_env"]
+        api_key = overrides.get("api_key", env.get(key_env, "") if key_env
+                                else "local")
+        if key_env and not api_key:
+            raise MuseError("NO_KEY", f"{key_env} is not set")
+        model = overrides.get(
+            "model", env.get(table["model_env"], table["model_default"]))
+        if not model:
+            raise MuseError("NO_MODEL",
+                            f"{table['model_env']} names no model")
+        price_in = env.get(table["price_in_env"], table["price_in_default"]) \
+            if table["price_in_env"] else table["price_in_default"]
+        price_out = env.get(table["price_out_env"],
+                            table["price_out_default"]) \
+            if table["price_out_env"] else table["price_out_default"]
+        if not price_in or not price_out:
+            raise MuseError("NO_PRICES",
+                            f"set {table['price_in_env']} and "
+                            f"{table['price_out_env']} (unknown prices "
+                            "cannot reserve spend)")
+        return cls(api_key=api_key,
                    base_url=overrides.get(
-                       "base_url", env.get(BASE_URL_ENV_VAR, DEFAULT_BASE_URL)),
-                   model=overrides.get(
-                       "model", env.get(MODEL_ENV_VAR, DEFAULT_MODEL)),
-                   input_usd_per_m=env.get(PRICE_INPUT_ENV_VAR,
-                                           DEFAULT_INPUT_USD_PER_M),
-                   output_usd_per_m=env.get(PRICE_OUTPUT_ENV_VAR,
-                                            DEFAULT_OUTPUT_USD_PER_M))
+                       "base_url",
+                       env.get(table["base_url_env"],
+                               table["base_url_default"])),
+                   model=model, input_usd_per_m=price_in,
+                   output_usd_per_m=price_out, provider=provider)
 
 
 def _price_nano(price_per_m: str, tokens: int) -> int:
@@ -219,6 +318,8 @@ class MuseModel:
 
     def __init__(self, config: MuseConfig):
         self.config = config
+        self.provider = config.provider
+        self.model = config.model
         self.url = config.base_url.rstrip("/") + "/chat/completions"
         self.last_cost_nano = 0
         self.calls = 0

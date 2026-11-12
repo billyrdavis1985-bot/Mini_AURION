@@ -243,5 +243,81 @@ class MuseTests(unittest.TestCase):
             mem.close()
 
 
+class ProviderConfigTests(unittest.TestCase):
+    """The config family: one OpenAI-compatible adapter, keyed by
+    provider. Meta keeps its legacy env names; every other provider
+    resolves keys, URLs, models, and prices from its own table row."""
+
+    def test_unknown_provider_is_refused(self):
+        with self.assertRaises(MuseError) as ctx:
+            MuseConfig.from_env(environ={}, provider="acme")
+        self.assertEqual(ctx.exception.code, "BAD_PROVIDER")
+
+    def test_openai_resolves_from_own_env(self):
+        env = {"OPENAI_API_KEY": "k", "MINI_AURION_OPENAI_MODEL": "m",
+               "MINI_AURION_OPENAI_PRICE_IN": "1.0",
+               "MINI_AURION_OPENAI_PRICE_OUT": "2.0"}
+        cfg = MuseConfig.from_env(environ=env, provider="openai")
+        self.assertEqual(cfg.provider, "openai")
+        self.assertEqual(cfg.base_url, "https://api.openai.com/v1")
+        self.assertEqual(cfg.model, "m")
+        self.assertEqual(MuseModel(cfg).provider, "openai")
+
+    def test_openai_missing_key_is_refused(self):
+        env = {"MINI_AURION_OPENAI_MODEL": "m",
+               "MINI_AURION_OPENAI_PRICE_IN": "1.0",
+               "MINI_AURION_OPENAI_PRICE_OUT": "2.0"}
+        with self.assertRaises(MuseError) as ctx:
+            MuseConfig.from_env(environ=env, provider="openai")
+        self.assertEqual(ctx.exception.code, "NO_KEY")
+
+    def test_openai_missing_model_is_refused(self):
+        env = {"OPENAI_API_KEY": "k",
+               "MINI_AURION_OPENAI_PRICE_IN": "1.0",
+               "MINI_AURION_OPENAI_PRICE_OUT": "2.0"}
+        with self.assertRaises(MuseError) as ctx:
+            MuseConfig.from_env(environ=env, provider="openai")
+        self.assertEqual(ctx.exception.code, "NO_MODEL")
+
+    def test_openai_missing_prices_are_refused(self):
+        env = {"OPENAI_API_KEY": "k", "MINI_AURION_OPENAI_MODEL": "m"}
+        with self.assertRaises(MuseError) as ctx:
+            MuseConfig.from_env(environ=env, provider="openai")
+        self.assertEqual(ctx.exception.code, "NO_PRICES")
+
+    def test_local_needs_no_key_and_costs_nothing(self):
+        env = {"MINI_AURION_LOCAL_MODEL": "m"}
+        cfg = MuseConfig.from_env(environ=env, provider="local")
+        self.assertEqual(cfg.provider, "local")
+        self.assertEqual(cfg.base_url, "http://127.0.0.1:11434/v1")
+        self.assertEqual(
+            MuseModel(cfg).worst_case_nano([{"text": "x" * 1000}]), 0)
+
+    def test_local_private_lan_http_is_allowed(self):
+        cfg = MuseConfig(api_key="local", provider="local",
+                         base_url="http://192.168.1.10:11434/v1",
+                         model="m", input_usd_per_m="0",
+                         output_usd_per_m="0")
+        self.assertEqual(cfg.provider, "local")
+
+    def test_local_public_url_is_refused(self):
+        with self.assertRaises(MuseError) as ctx:
+            MuseConfig(api_key="local", provider="local",
+                       base_url="http://8.8.8.8:11434/v1",
+                       model="m", input_usd_per_m="0",
+                       output_usd_per_m="0")
+        self.assertEqual(ctx.exception.code, "BAD_URL")
+
+    def test_models_conform_to_the_protocol(self):
+        for model in (FakeModel(), MuseModel(MuseConfig(
+                api_key="k", base_url="https://127.0.0.1/v1",
+                model="m"))):
+            for attr in ("provider", "model", "calls",
+                         "last_cost_nano"):
+                self.assertTrue(hasattr(model, attr), attr)
+            self.assertTrue(callable(model.complete))
+            self.assertTrue(callable(model.worst_case_nano))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,10 @@ class FakeModel:
     def __init__(self, script: list[dict] | None = None, *, model_id: str = "fake.m0"):
         self.script = list(script or [])
         self.model_id = model_id
+        self.provider = "fixture"
+        self.model = "fake"
+        self.provider = "fixture"
+        self.model = "fake"
         self.calls = 0
         self.last_cost_nano = 0
         self.seen: list[list] = []
@@ -42,6 +46,9 @@ class FakeModel:
                     "confidence": reply.get("confidence", 0.0),
                     "subtasks": list(reply.get("subtasks", []))}
         return {"text": ESCALATE_TEXT, "tool_calls": []}
+
+    def worst_case_nano(self, messages: list) -> int:
+        return 0
 
     def total_cost_nano(self) -> int:
         return 0

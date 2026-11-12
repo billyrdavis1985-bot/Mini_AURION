@@ -9,6 +9,8 @@ loop converges to an answer or an explicit escalation.
 """
 from __future__ import annotations
 
+import time
+
 from .fixture import ESCALATE_TEXT
 from .ledger import LedgerError
 from .messages import AgentMessage
@@ -62,12 +64,14 @@ class Specialist:
             converging = tools_out or last_call
             offered = [] if converging \
                 else self.tools.registry.definitions()
+            call_started = time.perf_counter()
             if self.investigator_prompt is None:
                 reply = self.model.complete(messages, tools=offered)
             else:
                 reply = self.model.complete(
                     messages, tools=offered,
                     system_prompt=self.investigator_prompt)
+            call_ms = int((time.perf_counter() - call_started) * 1000)
             if reservation is not None:
                 actual = getattr(self.model, "last_cost_nano", 0) or 0
                 self.tools.ledger.settle(reservation, actual)
@@ -75,7 +79,11 @@ class Specialist:
             calls = [] if converging else reply.get("tool_calls", [])
             self.tools.receipts.append(
                 agent_id=self.agent_id, task_id=task_id, action="model_call",
-                detail={"finish": "tools" if calls else "answer"},
+                detail={"finish": "tools" if calls else "answer",
+                        "provider": getattr(self.model, "provider",
+                                            "fixture"),
+                        "model": getattr(self.model, "model", "?"),
+                        "duration_ms": call_ms},
                 outcome="ok")
             if not calls:
                 text = reply.get("text", "")

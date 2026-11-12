@@ -20,6 +20,7 @@ import os
 import posixpath
 import re
 import subprocess
+import time
 import sys
 from dataclasses import replace
 from decimal import Decimal
@@ -417,6 +418,7 @@ def main(argv=None) -> int:
     if not args.live:
         print("refusing to run: live model calls need --live")
         return 2
+    eval_started = time.perf_counter()
     tree = Path(args.tree)
     cases = json.loads(CASES_PATH.read_text())["cases"]
     template = load_contract(CONTRACT_PATH, "")
@@ -511,12 +513,14 @@ def main(argv=None) -> int:
     totals = ledger.totals()
     ledger.close()
     report["spent_nano"] = totals["settled_nano"]
+    report["elapsed_s"] = round(time.perf_counter() - eval_started, 1)
     out_path.write_text(json.dumps(report, indent=1))
     print(f"wrote {out_path}")
     stable = sum(1 for c in report["cases"].values() if c["stable_4_of_5"])
     print(f"{stable}/{len(report['cases'])} cases stable at 4-of-5")
     print(f"eval spend: {totals['settled_nano']} nanoUSD"
           f" ({totals['settled_nano'] / NANO_PER_USD:.8f} USD)")
+    print(f"eval time: {time.perf_counter() - eval_started:.1f} s")
     return 0
 
 

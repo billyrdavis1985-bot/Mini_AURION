@@ -366,5 +366,39 @@ class OrchestratorTests(unittest.TestCase):
         self.assertNotIn("extra claims", result["text"])
 
 
+    def test_plan_receipt_carries_a_verdict(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]}, synth_text="A")
+        orc.run("t1", "question?")
+        plans = [r for r in self.receipts.read_all()
+                 if r["action"] == "plan"]
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0]["detail"]["verdict"], "accepted")
+        self.assertEqual(plans[0]["detail"]["subtasks"], ["s1"])
+
+    def test_plan_receipt_marks_refusals(self):
+        bad = {"id": "s9", "brief": "off contract", "specialist": "alpha"}
+        orc = self.build(plan(bad), {"alpha": [answer("A")]},
+                         contract=contract(), planner_prompt="p")
+        orc.run("t1", "question?")
+        plans = [r for r in self.receipts.read_all()
+                 if r["action"] == "plan"]
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0]["detail"]["verdict"], "refused")
+        self.assertEqual(plans[0]["detail"]["refused"], ["s9"])
+
+    def test_task_end_carries_wall_clock_duration(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]}, synth_text="A")
+        orc.run("t1", "question?")
+        ends = [r for r in self.receipts.read_all()
+                if r["action"] == "task_end"]
+        self.assertEqual(len(ends), 1)
+        self.assertIsInstance(ends[0]["detail"]["duration_ms"], int)
+        self.assertGreaterEqual(ends[0]["detail"]["duration_ms"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
