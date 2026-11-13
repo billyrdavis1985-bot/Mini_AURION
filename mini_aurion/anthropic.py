@@ -53,7 +53,9 @@ class AnthropicConfig:
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
-    temperature: float = 0.0
+    # No temperature knob: claude-haiku-5-5 answers 400
+    # "`temperature` is deprecated for this model" (measured live).
+    # Sampling behavior is the vendor default.
     provider: str = "anthropic"
 
     def __post_init__(self):
@@ -111,7 +113,6 @@ class AnthropicModel:
         self.calls += 1
         body = {"model": self.config.model,
                 "max_tokens": self.config.max_output_tokens,
-                "temperature": self.config.temperature,
                 "system": system_prompt or SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": text}
                              for text in merged_user_texts(messages)]}
