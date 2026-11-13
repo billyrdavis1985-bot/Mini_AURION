@@ -115,7 +115,7 @@ def short_http_error(exc: urllib.error.HTTPError) -> str:
         data = json.loads(raw)
         error = data.get("error", {}) if isinstance(data, dict) else {}
         kept = {}
-        for key in ("type", "code", "param"):
+        for key in ("type", "code", "param", "status"):
             value = error.get(key)
             if isinstance(value, str) and _ERROR_IDENTIFIER.fullmatch(value):
                 kept[key] = value

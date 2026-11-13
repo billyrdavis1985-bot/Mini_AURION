@@ -20,12 +20,14 @@ import json
 from pathlib import Path
 
 from .anthropic import AnthropicConfig, AnthropicModel
+from .google import GoogleConfig, GoogleModel
 from .muse import PROVIDERS, MuseConfig, MuseModel
 
 SEATS = ("specialist", "orchestrator", "verifier")
 # Native wire shapes, one config+model pair each. Everything else goes
 # through the OpenAI-compatible family in muse.PROVIDERS.
-NATIVE = {"anthropic": (AnthropicConfig, AnthropicModel)}
+NATIVE = {"anthropic": (AnthropicConfig, AnthropicModel),
+          "google": (GoogleConfig, GoogleModel)}
 
 
 class RoutingError(Exception):
