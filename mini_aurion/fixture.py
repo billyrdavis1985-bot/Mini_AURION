@@ -24,8 +24,6 @@ class FakeModel:
         self.model_id = model_id
         self.provider = "fixture"
         self.model = "fake"
-        self.provider = "fixture"
-        self.model = "fake"
         self.calls = 0
         self.last_cost_nano = 0
         self.seen: list[list] = []
