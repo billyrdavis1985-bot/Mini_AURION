@@ -117,6 +117,28 @@ kept (OPERATIONS section 7).
   extending it. Configuration, not code, for providers that share a
   wire shape.
 
+## F9. Vendors remove knobs: qualify every provider live
+
+- **Tried:** native Anthropic (#56) and Google (#57) seats, each
+  smoke-verified both directions against Meta on one drift case
+  (smoke_tiers, runners a60b556).
+- **Result:** both PASS/PASS. Cost per run: Anthropic pair A $0.0078
+  (haiku $0.0010) / B $0.0121 (haiku $0.0003); Google pair A $0.0114
+  (flash $0.0035) / B $0.0134 (flash $0.0006). With the B1 DeepSeek
+  pair ($0.0106/$0.0097), the family totals four verified providers
+  plus local-configured. Google accepted temperature 0.0; Anthropic
+  answered 400 to the field itself (fixed #59, six lines).
+- **Cost:** about $0.10 live spend all-in, including the failed
+  Anthropic rounds (their Meta seats still settled).
+- **Lesson (agents, portable):** a field valid at build time can 400
+  at run time. Fake-API tests prove the harness side only; adapter
+  qualification must include one live call per provider, on the
+  branch, before merge. Merging #56 on fakes alone cost four
+  debugging rounds.
+- **Lesson (pipeline):** the env-gated request dump (#60) is now
+  permanent tooling for provider 400s. Error shorts stay
+  identifiers-only per the pinned contract.
+
 ## F8. Verification dominates tier cost
 
 - **Tried:** B1 demo run B (cheap DeepSeek investigates, Meta judges
