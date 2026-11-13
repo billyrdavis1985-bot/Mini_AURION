@@ -67,6 +67,19 @@ def opener_for(base_url: str, error):
     return urllib.request.build_opener(_NoRedirect)
 
 
+def check_prices(input_usd_per_m: str, output_usd_per_m: str,
+                 error) -> None:
+    """Refuse unparseable prices at config time. A typo'd price must
+    fail the build, never detonate mid-run inside Decimal."""
+    from decimal import Decimal, InvalidOperation
+    for value in (input_usd_per_m, output_usd_per_m):
+        try:
+            Decimal(value)
+        except (InvalidOperation, ValueError, TypeError):
+            raise error("BAD_PRICES",
+                        f"price {value!r} is not a number") from None
+
+
 def price_nano(price_per_m: str, tokens: int) -> int:
     from decimal import Decimal
     return int(Decimal(price_per_m) * tokens * NANO_PER_USD / 1_000_000)

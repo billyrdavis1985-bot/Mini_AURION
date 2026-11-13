@@ -20,9 +20,10 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from .muse import SYSTEM_PROMPT
-from .provider_http import (check_base_url, estimate_input_tokens,
-                            merged_user_texts, opener_for, parse_text_reply,
-                            post_json, price_nano)
+from .provider_http import (check_base_url, check_prices,
+                            estimate_input_tokens, merged_user_texts,
+                            opener_for, parse_text_reply, post_json,
+                            price_nano)
 
 API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 BASE_URL_ENV_VAR = "MINI_AURION_ANTHROPIC_BASE_URL"
@@ -68,6 +69,8 @@ class AnthropicConfig:
                 "NO_PRICES",
                 f"set {PRICE_INPUT_ENV_VAR} and {PRICE_OUTPUT_ENV_VAR}"
                 " (unknown prices cannot reserve spend)")
+        check_prices(self.input_usd_per_m, self.output_usd_per_m,
+                     AnthropicError)
         if self.max_output_tokens <= 0 or self.timeout_seconds <= 0 \
                 or self.max_response_bytes <= 0:
             raise AnthropicError("BAD_CONFIG", "limits must be positive")

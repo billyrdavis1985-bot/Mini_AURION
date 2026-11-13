@@ -168,6 +168,15 @@ class GoogleTests(unittest.TestCase):
             GoogleConfig.from_env(environ=env)
         self.assertEqual(ctx.exception.code, "NO_PRICES")
 
+    def test_garbage_prices_refuse_at_config_time(self):
+        env = {"GOOGLE_API_KEY": "k",
+               "MINI_AURION_GOOGLE_MODEL": "m",
+               "MINI_AURION_GOOGLE_PRICE_IN": "1",
+               "MINI_AURION_GOOGLE_PRICE_OUT": "<billing>"}
+        with self.assertRaises(GoogleError) as ctx:
+            GoogleConfig.from_env(environ=env)
+        self.assertEqual(ctx.exception.code, "BAD_PRICES")
+
     def test_model_conforms_to_the_protocol(self):
         model = GoogleModel(self.config)
         self.assertEqual(model.provider, "google")
