@@ -94,7 +94,41 @@ kept (OPERATIONS section 7).
   planned with the monitor (count and tail in the anchor; SQLite index
   by task).
 
-## F7. (reserved) The same builder under VISION.md rules
+## F7. The same builder under VISION.md rules
 
-- To be recorded when B1 closes: PRs by type, runtime lines, rows moved,
-  days to demo, compared with F1.
+- **Tried:** the F1 builder (Muse Spark) under VISION.md: capability
+  line per PR, hardening budget, demo-shaped done, reviewer order.
+  Milestone B1, 2026-11-12 to 2026-11-13.
+- **Result:** 5 PRs to demo: #50 local-adapter build (pre-rules work,
+  later deleted), #52 interface build, #53 smoke build, #54 router
+  build, #55 this docs close. Zero hardening or eval PRs inside the
+  milestone (budget 0:4). Runtime net +344/-34 lines in `mini_aurion/`
+  (the deleted adapter included). Two VISION rows moved
+  (cheap tiers, premium tiers). One operator redirect mid-milestone
+  ("no calls" -> live smoke first) still applied.
+- **Cost:** $0.04 of live smoke spend; about a day of operator and
+  builder time.
+- **Lesson (agents):** against F1 (47 PRs, 6 days, 0 rows), the
+  difference was the per-PR capability line plus a demo as done. The
+  builder still over-built once (PR-1 verified with fixtures only);
+  the operator's redirect caught it in one round instead of six days.
+  Scoreboards steer; this one steered at the right layer.
+- **Lesson (pipeline):** deleting the local adapter (-91 lines) beat
+  extending it. Configuration, not code, for providers that share a
+  wire shape.
+
+## F8. Verification dominates tier cost
+
+- **Tried:** B1 demo run B (cheap DeepSeek investigates, Meta judges
+  and synthesizes), one drift case, `docs/demos/B1.md`.
+- **Result:** $0.0097 per verified answer: $0.0006 investigation (2
+  calls, 2.9 s) + $0.0091 judge and synthesis (2 calls, 5.2 s), 8 s
+  wall. Verification cost 15x the investigation it checked. n=1: a
+  smoke signal, not a measurement.
+- **Lesson (agents, portable):** in a verify-heavy pipeline the
+  premium seat is the budget, not the volume seat. AURION's tier
+  economics should price the verifier first; cheap investigation is
+  nearly free either way.
+- **Lesson (pipeline):** per-tier ledger columns plus per-call
+  receipts make the split visible instead of arguable. Closes F6's
+  timing gap for per-call and per-task seconds.

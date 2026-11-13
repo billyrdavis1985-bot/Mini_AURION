@@ -24,8 +24,8 @@ and probabilities, which is why the later milestones exist.
 | Commitment | Meaning (confirmed by the operator 2026-11-12) | Status | Proven by |
 | --- | --- | --- | --- |
 | Every action leaves a receipt | Hash-chained receipts, spend ledger, policy gate, task contracts, scope gate | **Built** | `tests/`, drift-batch-2 (gate holds) |
-| Cheap tiers do volume | Different models (ideally different providers) in different roles, chosen by a router | Not started | B1 demo |
-| Premium tiers decide and verify | A verifier on a different model/provider than the investigator; flags, never clears | Not started | B1 demo |
+| Cheap tiers do volume | Different models (ideally different providers) in different roles, chosen by a router | **Built** | `docs/demos/B1.md` |
+| Premium tiers decide and verify | A verifier on a different model/provider than the investigator; flags, never clears | **Built** | `docs/demos/B1.md` |
 | Research system | Open questions answered from real outside sources, not only the repo's own code | Not started | B2 demo |
 | Multi-agent | Agents that build on each other's **verified** findings through shared memory, not one model wearing several hats | In name only | B3 demo |
 | Autonomous workflow | A task runs several steps without the operator between them, inside stage bounds | Partial (single task, read-only) | B3 demo + M7 |
@@ -67,10 +67,10 @@ capability (OPERATIONS section 2).
 
 ## What the testbed must measure
 
-Time is not yet recorded anywhere. Before B1's demo, the runner records
-wall-clock per task and per model call (receipts already carry
-timestamps; nothing aggregates them). Every finding from then on carries
-three numbers: dollars, seconds, and the outcome.
+Recorded since B1 (PR #52): wall-clock per task (`task_end`) and
+per model call (`model_call`), runners print seconds next to dollars.
+Every finding from then on carries three numbers: dollars, seconds,
+and the outcome.
 
 ## Open questions for the operator
 
