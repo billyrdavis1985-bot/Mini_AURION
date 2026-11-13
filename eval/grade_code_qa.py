@@ -346,7 +346,7 @@ QUOTE_NOTE = ("\n\nCite every file as path:line plus the exact quoted "
 def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger, template, scope_note: str = "",
              exactness_note: str = "", quote_note: str = "",
-             spec_model=None, orc_model=None) -> dict:
+             spec_model=None, orc_model=None, router=None) -> dict:
     question = case["question"]
     state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -370,7 +370,15 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
             parameters={"type": "object",
                         "properties": {"path": {"type": "string"}}})
         # One shared model by default; the tiers smoke passes two so
-        # specialist and orchestrator run on different providers.
+        # specialist and orchestrator run on different providers. A
+        # router beats explicit models: the table is the assignment.
+        routing_hash = None
+        verifier_model = None
+        if router is not None:
+            spec_model = router.model_for("specialist")
+            orc_model = router.model_for("orchestrator")
+            verifier_model = router.model_for("verifier")
+            routing_hash = router.table_hash()
         if spec_model is None and orc_model is None:
             spec_model = orc_model = MuseModel(MuseConfig.from_env())
         elif spec_model is None:
@@ -407,6 +415,8 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
             message_budget=contract.messages,
             planner_prompt=PLANNER_PROMPT,
             judge_prompt=RELEVANCE_PROMPT,
+            verifier_model=verifier_model,
+            routing_hash=routing_hash,
             acceptance=(("A1", grade_check),
                         ("A2", lambda cand: scope_denials(receipts) == 0)))
         result = orc.run(task_id, brief)

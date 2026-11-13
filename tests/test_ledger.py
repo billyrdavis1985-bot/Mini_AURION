@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 
@@ -20,11 +21,13 @@ class LedgerTests(unittest.TestCase):
     def test_reserve_settle_math(self):
         rid = self.ledger.reserve("t1", 4_000)
         self.assertEqual(self.ledger.spend("t1"),
-                         {"settled_nano": 0, "inflight_nano": 4_000})
+                         {"settled_nano": 0, "inflight_nano": 4_000,
+                          "by_provider": {}})
         overrun = self.ledger.settle(rid, 3_000)
         self.assertFalse(overrun)
         self.assertEqual(self.ledger.spend("t1"),
-                         {"settled_nano": 3_000, "inflight_nano": 0})
+                         {"settled_nano": 3_000, "inflight_nano": 0,
+                          "by_provider": {"/": 3_000}})
 
     def test_task_cap_refuses_before_spending(self):
         self.ledger.reserve("t1", 9_000)
@@ -96,6 +99,47 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaises(LedgerError):
             Ledger(os.path.join(self.tmp.name, "b.sqlite3"),
                    task_cap_nano=0, daily_cap_nano=1, global_cap_nano=1)
+
+
+    def test_spend_reports_per_tier(self):
+        first = self.ledger.reserve("t1", 4_000, provider="meta",
+                                    model="m")
+        second = self.ledger.reserve("t1", 4_000, provider="deepseek",
+                                     model="d")
+        self.ledger.settle(first, 1_000)
+        self.ledger.settle(second, 2_000)
+        spend = self.ledger.spend("t1")
+        self.assertEqual(spend["settled_nano"], 3_000)
+        self.assertEqual(spend["by_provider"],
+                         {"meta/m": 1_000, "deepseek/d": 2_000})
+        totals = self.ledger.totals()
+        self.assertEqual(totals["by_provider"],
+                         {"meta/m": 1_000, "deepseek/d": 2_000})
+
+    def test_pre_tier_store_migrates_in_place(self):
+        path = os.path.join(self.tmp.name, "old.sqlite3")
+        db = sqlite3.connect(path)
+        db.execute(
+            "CREATE TABLE reservations (id TEXT PRIMARY KEY,"
+            " task_id TEXT NOT NULL, estimate_nano INTEGER NOT NULL,"
+            " state TEXT NOT NULL, actual_nano INTEGER, day TEXT NOT NULL,"
+            " created_at TEXT NOT NULL)")
+        db.execute(
+            "INSERT INTO reservations VALUES ('old1', 't0', 500,"
+            " 'settled', 500, '2026-01-01', '2026-01-01T00:00:00Z')")
+        db.commit()
+        db.close()
+        migrated = Ledger(path, **CAPS)
+        try:
+            rid = migrated.reserve("t1", 4_000, provider="meta",
+                                   model="m")
+            migrated.settle(rid, 1_000)
+            totals = migrated.totals()
+            self.assertEqual(totals["settled_nano"], 1_500)
+            self.assertEqual(totals["by_provider"],
+                             {"/": 500, "meta/m": 1_000})
+        finally:
+            migrated.close()
 
 
 if __name__ == "__main__":

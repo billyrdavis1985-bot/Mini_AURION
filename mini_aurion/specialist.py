@@ -50,7 +50,9 @@ class Specialist:
             if self.model_estimate_nano > 0:
                 try:
                     reservation = self.tools.ledger.reserve(
-                        task_id, self.model_estimate_nano)
+                        task_id, self.model_estimate_nano,
+                        provider=getattr(self.model, "provider", ""),
+                        model=getattr(self.model, "model", ""))
                 except LedgerError as exc:
                     return self._escalated(
                         task_id, brief, cost_nano,
