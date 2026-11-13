@@ -145,7 +145,8 @@ PROVIDERS = {
                "price_in_env": "MINI_AURION_OPENAI_PRICE_IN",
                "price_out_env": "MINI_AURION_OPENAI_PRICE_OUT",
                "price_in_default": "", "price_out_default": "",
-               "tokens_field": "max_completion_tokens"},
+               "tokens_field": "max_completion_tokens",
+               "temperature": None},
     "deepseek": {"key_env": "DEEPSEEK_API_KEY",
                  "base_url_env": "MINI_AURION_DEEPSEEK_BASE_URL",
                  "base_url_default": "https://api.deepseek.com/v1",
@@ -154,7 +155,8 @@ PROVIDERS = {
                  "price_in_env": "MINI_AURION_DEEPSEEK_PRICE_IN",
                  "price_out_env": "MINI_AURION_DEEPSEEK_PRICE_OUT",
                  "price_in_default": "", "price_out_default": "",
-               "tokens_field": "max_tokens"},
+               "tokens_field": "max_tokens",
+               "temperature": 0.0},
     "local": {"key_env": None,
               "base_url_env": "MINI_AURION_LOCAL_BASE_URL",
               "base_url_default": "http://127.0.0.1:11434/v1",
@@ -162,7 +164,8 @@ PROVIDERS = {
               "model_default": "",
               "price_in_env": None, "price_out_env": None,
               "price_in_default": "0", "price_out_default": "0",
-              "tokens_field": "max_tokens"},
+              "tokens_field": "max_tokens",
+              "temperature": 0.0},
 }
 
 
@@ -282,13 +285,19 @@ class MuseModel:
         # so the field is per provider, not per family.
         tokens_field = PROVIDERS.get(self.config.provider, {}).get(
             "tokens_field", "max_tokens")
+        # gpt-5-mini 400s on any temperature but the default (measured
+        # live: unsupported_value), so the OpenAI row omits the knob
+        # and sampling is the vendor default there.
+        row_temp = PROVIDERS.get(self.config.provider, {}).get(
+            "temperature", self.config.temperature)
         body = {"model": self.config.model,
                 "messages": [{"role": "system",
                               "content": system_prompt or SYSTEM_PROMPT}]
                 + [_api_message(m) for m in messages],
                 tokens_field: self.config.max_output_tokens,
-                "temperature": self.config.temperature,
                 "tool_choice": "auto"}
+        if row_temp is not None:
+            body["temperature"] = row_temp
         if tools:
             body["tools"] = [
                 {"type": "function",

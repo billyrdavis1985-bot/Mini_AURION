@@ -95,12 +95,14 @@ class MuseTests(unittest.TestCase):
         body = ScriptedHandler.requests[0]["body"]
         self.assertIn("max_completion_tokens", body)
         self.assertNotIn("max_tokens", body)
+        self.assertNotIn("temperature", body)
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
         MuseModel(self.config).complete(
             [{"role": "user", "text": "hi"}], [])
         body = ScriptedHandler.requests[1]["body"]
         self.assertIn("max_tokens", body)
         self.assertNotIn("max_completion_tokens", body)
+        self.assertEqual(body["temperature"], 0.0)
 
     def test_system_prompt_override_reaches_the_api(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
