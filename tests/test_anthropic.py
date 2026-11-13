@@ -186,6 +186,15 @@ class AnthropicTests(unittest.TestCase):
                             output_usd_per_m="1")
         self.assertEqual(ctx.exception.code, "BAD_URL")
 
+    def test_garbage_prices_refuse_at_config_time(self):
+        env = {"ANTHROPIC_API_KEY": "k",
+               "MINI_AURION_ANTHROPIC_MODEL": "m",
+               "MINI_AURION_ANTHROPIC_PRICE_IN": "<billing>",
+               "MINI_AURION_ANTHROPIC_PRICE_OUT": "1"}
+        with self.assertRaises(AnthropicError) as ctx:
+            AnthropicConfig.from_env(environ=env)
+        self.assertEqual(ctx.exception.code, "BAD_PRICES")
+
     def test_model_conforms_to_the_protocol(self):
         model = AnthropicModel(self.config)
         self.assertEqual(model.provider, "anthropic")

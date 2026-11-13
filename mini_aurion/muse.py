@@ -26,9 +26,9 @@ from urllib.parse import urlsplit
 
 from .provider_http import (MAX_MESSAGE_CHARS,  # noqa: F401 - re-exported
                             api_user_message as _api_message,
-                            check_base_url, estimate_input_tokens,
-                            opener_for, parse_text_reply, post_json,
-                            price_nano)
+                            check_base_url, check_prices,
+                            estimate_input_tokens, opener_for,
+                            parse_text_reply, post_json, price_nano)
 
 API_KEY_ENV_VAR = "MODEL_API_KEY"
 BASE_URL_ENV_VAR = "MINI_AURION_MUSE_BASE_URL"
@@ -201,6 +201,8 @@ class MuseConfig:
         if self.max_output_tokens <= 0 or self.timeout_seconds <= 0 \
                 or self.max_response_bytes <= 0:
             raise MuseError("BAD_CONFIG", "limits must be positive")
+        check_prices(self.input_usd_per_m, self.output_usd_per_m,
+                     MuseError)
 
     @classmethod
     def from_env(cls, environ=None, provider="meta", **overrides):

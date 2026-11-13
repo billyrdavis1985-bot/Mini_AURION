@@ -308,6 +308,14 @@ class ProviderConfigTests(unittest.TestCase):
                        output_usd_per_m="0")
         self.assertEqual(ctx.exception.code, "BAD_URL")
 
+    def test_garbage_prices_refuse_at_config_time(self):
+        env = {"OPENAI_API_KEY": "k", "MINI_AURION_OPENAI_MODEL": "m",
+               "MINI_AURION_OPENAI_PRICE_IN": "<billing>",
+               "MINI_AURION_OPENAI_PRICE_OUT": "2.0"}
+        with self.assertRaises(MuseError) as ctx:
+            MuseConfig.from_env(environ=env, provider="openai")
+        self.assertEqual(ctx.exception.code, "BAD_PRICES")
+
     def test_models_conform_to_the_protocol(self):
         for model in (FakeModel(), MuseModel(MuseConfig(
                 api_key="k", base_url="https://127.0.0.1/v1",
