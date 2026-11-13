@@ -143,11 +143,45 @@ class RouterTests(unittest.TestCase):
         self.assertNotEqual(left.table_hash(), changed.table_hash())
 
 
+    def test_native_seat_builds_from_env(self):
+        env = {"ANTHROPIC_API_KEY": "fake",
+               "MINI_AURION_ANTHROPIC_MODEL": "m",
+               "MINI_AURION_ANTHROPIC_PRICE_IN": "1",
+               "MINI_AURION_ANTHROPIC_PRICE_OUT": "2",
+               "MINI_AURION_LOCAL_MODEL": "m"}
+        router = Router(table(
+            specialist={"provider": "anthropic", "model": ""},
+            orchestrator={"provider": "local", "model": "m"}),
+            environ=env)
+        model = router.model_for("specialist")
+        self.assertEqual(model.provider, "anthropic")
+        self.assertEqual(model.model, "m")
+
+    def test_cross_provider_rule_covers_native_seats(self):
+        env = {"ANTHROPIC_API_KEY": "fake",
+               "MINI_AURION_ANTHROPIC_MODEL": "m",
+               "MINI_AURION_ANTHROPIC_PRICE_IN": "1",
+               "MINI_AURION_ANTHROPIC_PRICE_OUT": "2"}
+        with self.assertRaises(RoutingError) as ctx:
+            Router(table(
+                specialist={"provider": "anthropic", "model": ""},
+                orchestrator={"provider": "anthropic", "model": ""}),
+                environ=env)
+        self.assertEqual(ctx.exception.code, "SAME_PROVIDER")
+
     def test_shipped_b1_table_is_valid(self):
         root = Path(__file__).resolve().parent.parent
         parsed = load_routing_table(root / "eval" / "routing-b1.json")
         self.assertEqual(parsed["specialist"]["provider"], "meta")
         self.assertEqual(parsed["orchestrator"]["provider"], "deepseek")
+        self.assertFalse(parsed["same_provider_ok"])
+
+    def test_shipped_anthropic_table_is_valid(self):
+        root = Path(__file__).resolve().parent.parent
+        parsed = load_routing_table(
+            root / "eval" / "routing-anthropic.json")
+        self.assertEqual(parsed["specialist"]["provider"], "anthropic")
+        self.assertEqual(parsed["orchestrator"]["provider"], "meta")
         self.assertFalse(parsed["same_provider_ok"])
 
 

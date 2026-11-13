@@ -16,18 +16,19 @@ Bearer auth, tool_choice auto only, usage in prompt/completion tokens.
 """
 from __future__ import annotations
 
-import http.client
 import ipaddress
 import json
 import os
-import re
 import typing
-import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from .specialist import MAX_TOOL_CHARS
+from .provider_http import (MAX_MESSAGE_CHARS,  # noqa: F401 - re-exported
+                            api_user_message as _api_message,
+                            check_base_url, estimate_input_tokens,
+                            opener_for, parse_text_reply, post_json,
+                            price_nano)
 
 API_KEY_ENV_VAR = "MODEL_API_KEY"
 BASE_URL_ENV_VAR = "MINI_AURION_MUSE_BASE_URL"
@@ -46,11 +47,6 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 NANO_PER_USD = 1_000_000_000
-# Per-message cap. Derived from the producer's cap, with headroom: the
-# specialist emits MAX_TOOL_CHARS plus its own marker, and an equal cap here
-# would cut that marker off and misreport the already-cut size as the file's
-# size. Any cut here is marked, never silent.
-MAX_MESSAGE_CHARS = MAX_TOOL_CHARS + 200
 
 PROMPT_VERSION = "m0.mini-aurion-investigator.v3"
 
@@ -108,24 +104,11 @@ need it. Listings, orientations, and background are IRRELEVANT unless
 the question asks for them.
 """
 
-_ERROR_IDENTIFIER = re.compile(r"[A-Za-z0-9_.\[\]-]{1,64}")
-_FENCED_JSON = re.compile(r"```(?:json|JSON)?[ \t]*\r?\n(.*?)\r?\n[ \t]*```",
-                           re.DOTALL)
-
 
 class MuseError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(f"{code}: {message}")
         self.code = code
-
-
-def _is_loopback(host: str | None) -> bool:
-    if host == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host or "").is_loopback
-    except ValueError:
-        return False
 
 
 def _is_private_host(host: str | None) -> bool:
@@ -150,20 +133,7 @@ def _check_local_base_url(url: str) -> str:
 
 
 def _check_base_url(url: str) -> str:
-    parts = urlsplit(url)
-    if parts.username or parts.password or parts.query or parts.fragment \
-            or not parts.hostname:
-        raise MuseError("BAD_URL", "base URL must be a plain https URL")
-    if parts.scheme == "https" or (parts.scheme == "http"
-                                   and _is_loopback(parts.hostname)):
-        return url.rstrip("/")
-    raise MuseError("BAD_URL",
-                    "https required (plain http only for loopback tests)")
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise MuseError("REDIRECT_REFUSED", "redirects are refused")
+    return check_base_url(url, MuseError)
 
 
 PROVIDERS = {
@@ -279,40 +249,6 @@ class MuseConfig:
                    output_usd_per_m=price_out, provider=provider)
 
 
-def _price_nano(price_per_m: str, tokens: int) -> int:
-    from decimal import Decimal
-    return int(Decimal(price_per_m) * tokens * NANO_PER_USD / 1_000_000)
-
-
-def _estimate_input_tokens(body_chars: int) -> int:
-    return max(1, body_chars // 4)
-
-
-def _api_message(message: dict) -> dict:
-    """Map every internal role to user text. Internal roles (brief,
-    tool_result, planner-chosen subtask ids) are untrusted labels, so they
-    ride inside the text where they cannot become instructions."""
-    role = str(message.get("role", "user"))
-    text = str(message.get("text", ""))
-    if len(text) > MAX_MESSAGE_CHARS:
-        text = (text[:MAX_MESSAGE_CHARS] +
-                f"\n[truncated: showing {MAX_MESSAGE_CHARS} of {len(text)}"
-                " chars]")
-    # Tool results name their request: without the tool and args the model
-    # cannot tell its own past calls apart and re-issues them (measured
-    # live: list_dir . three times in one task). Tool and args are
-    # harness-known, not model-supplied, so they are safe to render.
-    if role == "tool_result":
-        args_repr = repr(message.get("args", {}))
-        if len(args_repr) > 200:
-            args_repr = args_repr[:200] + "...[args truncated]"
-        text = (f"[tool_result {message.get('tool', '')}"
-                f" {args_repr}]\n{text}")
-    elif role != "user":
-        text = f"[{role}] {text}"
-    return {"role": "user", "content": text}
-
-
 class MuseModel:
     """Live model behind the specialist/orchestrator protocol."""
 
@@ -323,19 +259,14 @@ class MuseModel:
         self.url = config.base_url.rstrip("/") + "/chat/completions"
         self.last_cost_nano = 0
         self.calls = 0
-        host = urlsplit(config.base_url).hostname
-        if _is_loopback(host):
-            self._opener = urllib.request.build_opener(
-                _NoRedirect, urllib.request.ProxyHandler({}))
-        else:
-            self._opener = urllib.request.build_opener(_NoRedirect)
+        self._opener = opener_for(config.base_url, MuseError)
 
     def worst_case_nano(self, messages: list, max_new_text_chars: int = 0) -> int:
         body_chars = len(json.dumps(messages)) + max_new_text_chars
-        in_tokens = _estimate_input_tokens(body_chars)
-        return (_price_nano(self.config.input_usd_per_m, in_tokens)
-                + _price_nano(self.config.output_usd_per_m,
-                              self.config.max_output_tokens))
+        in_tokens = estimate_input_tokens(body_chars)
+        return (price_nano(self.config.input_usd_per_m, in_tokens)
+                + price_nano(self.config.output_usd_per_m,
+                             self.config.max_output_tokens))
 
     def complete(self, messages: list, tools: list,
                  system_prompt: str | None = None) -> dict:
@@ -360,25 +291,9 @@ class MuseModel:
             self.url, data=raw_body,
             headers={"Authorization": f"Bearer {self.config.api_key}",
                      "Content-Type": "application/json"})
-        try:
-            with self._opener.open(request,
-                                   timeout=self.config.timeout_seconds) as resp:
-                payload = resp.read(self.config.max_response_bytes + 1)
-        except MuseError:
-            raise
-        except urllib.error.HTTPError as exc:
-            raise MuseError("HTTP_ERROR",
-                            self._short_error(exc)) from exc
-        except (urllib.error.URLError, http.client.HTTPException,
-                TimeoutError, OSError) as exc:
-            raise MuseError("TRANSPORT_FAILED",
-                            f"{type(exc).__name__}") from exc
-        if len(payload) > self.config.max_response_bytes:
-            raise MuseError("RESPONSE_TOO_LARGE", "response exceeded the cap")
-        try:
-            response = json.loads(payload.decode("utf-8"))
-        except ValueError as exc:
-            raise MuseError("BAD_RESPONSE", "response is not JSON") from exc
+        response = post_json(self._opener, request,
+                             self.config.timeout_seconds,
+                             self.config.max_response_bytes, MuseError)
         self.last_cost_nano = self._cost_of(response, len(raw_body))
         return self._to_reply(response)
 
@@ -388,9 +303,9 @@ class MuseModel:
             prompt = usage.get("prompt_tokens")
             completion = usage.get("completion_tokens")
             if isinstance(prompt, int) and isinstance(completion, int):
-                return (_price_nano(self.config.input_usd_per_m, prompt)
-                        + _price_nano(self.config.output_usd_per_m,
-                                      completion))
+                return (price_nano(self.config.input_usd_per_m, prompt)
+                        + price_nano(self.config.output_usd_per_m,
+                                     completion))
         return self.worst_case_nano([], request_bytes)
 
     def _to_reply(self, response: dict) -> dict:
@@ -421,52 +336,4 @@ class MuseModel:
         if tool_calls:
             return {"text": str(content), "tool_calls": tool_calls,
                     "evidence": [], "confidence": 0.0, "subtasks": []}
-        text = str(content).strip()
-        if text == "CANNOT_VERIFY":
-            return {"text": text, "tool_calls": [], "evidence": [],
-                    "confidence": 0.0, "subtasks": []}
-        parsed = self._parse_json(text)
-        if parsed is None:
-            return {"text": text, "tool_calls": [], "evidence": [],
-                    "confidence": 0.0, "subtasks": []}
-        evidence = parsed.get("evidence", [])
-        if not isinstance(evidence, list):
-            evidence = []
-        try:
-            confidence = float(parsed.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
-        subtasks = parsed.get("subtasks", [])
-        if not isinstance(subtasks, list):
-            subtasks = []
-        return {"text": str(parsed.get("claim", text)),
-                "tool_calls": [], "evidence": evidence,
-                "confidence": min(max(confidence, 0.0), 1.0),
-                "subtasks": subtasks}
-
-    @staticmethod
-    def _parse_json(text: str):
-        candidate = text
-        fenced = _FENCED_JSON.search(text)
-        if fenced:
-            candidate = fenced.group(1)
-        try:
-            parsed = json.loads(candidate)
-        except ValueError:
-            return None
-        return parsed if isinstance(parsed, dict) else None
-
-    @staticmethod
-    def _short_error(exc: urllib.error.HTTPError) -> str:
-        try:
-            raw = exc.read(2048).decode("utf-8", "replace")
-            data = json.loads(raw)
-            error = data.get("error", {}) if isinstance(data, dict) else {}
-            kept = {}
-            for key in ("type", "code", "param"):
-                value = error.get(key)
-                if isinstance(value, str) and _ERROR_IDENTIFIER.fullmatch(value):
-                    kept[key] = value
-            return f"HTTP {exc.code} {kept or 'no-detail'}"
-        except Exception:  # noqa: BLE001 - error parsing never fails the call path
-            return f"HTTP {exc.code}"
+        return parse_text_reply(str(content))
