@@ -54,7 +54,8 @@ class Orchestrator:
         self.messages_used = 0
 
     def _complete(self, task_id: str, messages: list,
-                  system: str | None = None) -> dict:
+                  system: str | None = None,
+                  role: str = "complete") -> dict:
         reservation = None
         if self.model_estimate_nano > 0:
             try:
@@ -62,14 +63,26 @@ class Orchestrator:
                                                   self.model_estimate_nano)
             except LedgerError as exc:
                 raise _ModelRefused(str(exc)) from exc
+        call_started = time.perf_counter()
         if system is None:
             reply = self.model.complete(messages, tools=[])
         else:
             reply = self.model.complete(messages, tools=[],
                                         system_prompt=system)
+        call_ms = int((time.perf_counter() - call_started) * 1000)
         if reservation is not None:
             actual = getattr(self.model, "last_cost_nano", 0) or 0
             self.ledger.settle(reservation, actual)
+        # The orchestrator's own calls are receipted like the
+        # specialist's: without this the judge and synthesis are
+        # invisible, and no receipt says which model judged.
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="model_call",
+            detail={"finish": "answer", "role": role,
+                    "provider": getattr(self.model, "provider", "fixture"),
+                    "model": getattr(self.model, "model", "?"),
+                    "duration_ms": call_ms},
+            outcome="ok")
         return reply
 
     def run(self, task_id: str, question: str) -> dict:
@@ -116,7 +129,8 @@ class Orchestrator:
             plan = {"subtasks": []}
         else:
             try:
-                plan = self._complete(task_id, plan_messages, system=system)
+                plan = self._complete(task_id, plan_messages, system=system,
+                                      role="plan")
             except _ModelRefused as exc:
                 return self._finish(
                     task_id, [], [], "escalated",
@@ -156,7 +170,8 @@ class Orchestrator:
                 task_id, [{"role": "format", "text": SYNTH_FORMAT},
                           {"role": "question", "text": question}] +
                 [{"role": f["subtask"], "text": f["message"].claim}
-                 for f in accepted])
+                 for f in accepted],
+                role="synthesis")
         except _ModelRefused as exc:
             synthesis = None
             synth_note = f"synthesis refused: {exc}"
@@ -339,7 +354,7 @@ class Orchestrator:
             reply = self._complete(
                 task_id, [{"role": "question", "text": question},
                           {"role": "finding", "text": message.claim}],
-                system=self.judge_prompt)
+                system=self.judge_prompt, role="judge")
             verdict, _, reason = reply.get("text", "").partition(":")
             decision = verdict.strip().casefold()
             if decision not in ("relevant", "irrelevant"):

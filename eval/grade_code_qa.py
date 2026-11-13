@@ -345,7 +345,8 @@ QUOTE_NOTE = ("\n\nCite every file as path:line plus the exact quoted "
 
 def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger, template, scope_note: str = "",
-             exactness_note: str = "", quote_note: str = "") -> dict:
+             exactness_note: str = "", quote_note: str = "",
+             spec_model=None, orc_model=None) -> dict:
     question = case["question"]
     state_dir = _fresh_dir(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -368,8 +369,18 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
                         " the file most likely to hold the answer.",
             parameters={"type": "object",
                         "properties": {"path": {"type": "string"}}})
-        model = MuseModel(MuseConfig.from_env())
-        estimate = model.worst_case_nano([{"role": "brief", "text": question}])
+        # One shared model by default; the tiers smoke passes two so
+        # specialist and orchestrator run on different providers.
+        if spec_model is None and orc_model is None:
+            spec_model = orc_model = MuseModel(MuseConfig.from_env())
+        elif spec_model is None:
+            spec_model = orc_model
+        elif orc_model is None:
+            orc_model = spec_model
+        estimate = spec_model.worst_case_nano(
+            [{"role": "brief", "text": question}])
+        orc_estimate = orc_model.worst_case_nano(
+            [{"role": "brief", "text": question}])
         brief = (question + scope_note + exactness_note + quote_note
                  + "\n\nTop-level layout of the repo you are"
                  " searching (orient yourself, then read the file most"
@@ -378,7 +389,7 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
                             stage="experimental", task_id=task_id,
                             agent_id="spec", scope=contract)
-        spec = Specialist("spec", model, tools,
+        spec = Specialist("spec", spec_model, tools,
                           model_estimate_nano=estimate,
                           investigator_prompt=SYSTEM_PROMPT)
 
@@ -389,10 +400,10 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
             return ok
 
         orc = Orchestrator(
-            "orc", model, {"spec": spec},
+            "orc", orc_model, {"spec": spec},
             Critic("critic", memory, receipts=receipts),
             receipts=receipts, ledger=ledger,
-            model_estimate_nano=estimate, contract=contract,
+            model_estimate_nano=orc_estimate, contract=contract,
             message_budget=contract.messages,
             planner_prompt=PLANNER_PROMPT,
             judge_prompt=RELEVANCE_PROMPT,

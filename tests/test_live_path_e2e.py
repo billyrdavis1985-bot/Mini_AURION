@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from eval import grade_code_qa  # noqa: E402
 from mini_aurion.contract import load_contract  # noqa: E402
 from mini_aurion.critic import Critic  # noqa: E402
+from mini_aurion.fixture import FakeModel  # noqa: E402
 from mini_aurion.ledger import Ledger  # noqa: E402
 from mini_aurion.memory import Memory  # noqa: E402
 from mini_aurion.muse import MuseConfig, MuseModel  # noqa: E402
@@ -331,6 +332,40 @@ class ReviewFindingsPR11(_LiveHarness):
                                      "--tree", self.corpus, "--out", out])
         self.assertNotEqual(rc, 0)
         self.assertEqual(_FakeAPI.seen, [], "model calls made before refusing")
+
+
+class TwoTierWiring(_LiveHarness):
+    def test_two_models_split_specialist_and_orchestrator(self):
+        """run_live accepts one model per seat: the specialist's
+        calls name its provider, the judge's and synthesis' name
+        the orchestrator's. $0, no HTTP."""
+        ev = [{"kind": "file", "ref": "note.txt:1",
+               "quote": "REAL TOPIC SENTENCE"}]
+        spec_model = FakeModel([
+            {"text": "", "tool_calls": [
+                {"tool": "read_file", "args": {"path": "note.txt"}}]},
+            {"text": "The topic is quoted.", "evidence": ev}])
+        spec_model.provider = "prov-spec"
+        orc_model = FakeModel([
+            {"text": "RELEVANT: answers it"},
+            {"text": "The topic is quoted.", "evidence": ev}])
+        orc_model.provider = "prov-orc"
+        state = Path(self.dir) / "state" / "qa-x-r1"
+        led = Ledger(os.path.join(self.dir, "eval-l.db"),
+                     task_cap_nano=BIG, daily_cap_nano=BIG,
+                     global_cap_nano=BIG)
+        try:
+            result = grade_code_qa.run_live(
+                {"id": "qa-x", "type": "bogus", "question": "topic?"},
+                "qa-x-r1", Path(self.corpus), state, led,
+                load_contract(grade_code_qa.CONTRACT_PATH, "topic?"),
+                spec_model=spec_model, orc_model=orc_model)
+        finally:
+            led.close()
+        providers = {r["detail"].get("provider") for r in ReceiptStore(
+            result["receipts_path"]).read_all()
+            if r["action"] == "model_call"}
+        self.assertEqual(providers, {"prov-spec", "prov-orc"})
 
 
 if __name__ == "__main__":
