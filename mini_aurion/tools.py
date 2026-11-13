@@ -184,7 +184,9 @@ class ToolWrapper:
         reservation = None
         if estimate_nano > 0:
             try:
-                reservation = self.ledger.reserve(self.task_id, estimate_nano)
+                reservation = self.ledger.reserve(
+                    self.task_id, estimate_nano, provider="tools",
+                    model="exec")
             except LedgerError as exc:
                 self.receipts.append(agent_id=self.agent_id,
                                      task_id=self.task_id,

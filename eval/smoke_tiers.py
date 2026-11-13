@@ -4,12 +4,12 @@ Live use (operator PC, both keys set):
   python eval/smoke_tiers.py --live --tree <frozen-tree>
       --out eval/results-tiers-smoke.json
 
-Run A puts the specialist on Meta and the orchestrator (judge and
-synthesis) on DeepSeek; run B swaps the seats. Each run grades,
-then reports which providers its receipts name. This is a smoke
-signal, not an eval set: two runs prove the tiers connect, nothing
-about quality. Needs MODEL_API_KEY plus the DeepSeek env row
-(DEEPSEEK_API_KEY, MINI_AURION_DEEPSEEK_MODEL, prices).
+Seats come from a routing table (default eval/routing-b1.json):
+run A runs it as written, run B swaps specialist and orchestrator.
+Each run grades, then reports which providers its receipts name and
+what each tier cost. This is a smoke signal, not an eval set: two
+runs prove the tiers connect, nothing about quality. Needs the key
+row for every provider the table names.
 """
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ from eval.grade_code_qa import (EXACTNESS_NOTE, NANO_PER_USD,  # noqa: E402
 from eval.grade_drift import (CONTRACT_ID, DRIFT_PATH,  # noqa: E402
                               drift_contract, drift_note, frozen_match)
 from mini_aurion.ledger import Ledger  # noqa: E402
-from mini_aurion.muse import (MuseConfig, MuseError,  # noqa: E402
-                              MuseModel)
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
+from mini_aurion.router import (Router, RoutingError,  # noqa: E402
+                                load_routing_table)
 
 
 def providers_in(receipts_path: str) -> tuple[list, int]:
@@ -53,6 +53,7 @@ def main(argv=None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--cap-usd", default="1.00")
     parser.add_argument("--case", default="drift-ledger-mechanism")
+    parser.add_argument("--routing", default=None)
     args = parser.parse_args(argv)
     if not args.live:
         print("refusing to run: live model calls need --live")
@@ -84,18 +85,23 @@ def main(argv=None) -> int:
     except Exception:
         print(f"refusing to run: bad cap {args.cap_usd!r}")
         return 2
+    routing_path = Path(args.routing) if args.routing else \
+        DRIFT_PATH.parent / "routing-b1.json"
     try:
-        meta_cfg = MuseConfig.from_env()
-        ds_cfg = MuseConfig.from_env(provider="deepseek")
-    except MuseError as exc:
+        table = load_routing_table(routing_path)
+        router_a = Router(table)
+    except RoutingError as exc:
         print(f"refusing to run: {exc}")
         return 2
     print(f"cap: {args.cap_usd} USD")
     print(f"contract: {CONTRACT_ID} v1")
-    for cfg in (meta_cfg, ds_cfg):
-        print(f"model: {cfg.provider}/{cfg.model} at"
-              f" {cfg.input_usd_per_m}/{cfg.output_usd_per_m}"
-              " USD per M tokens (in/out)")
+    print(f"routing: {routing_path} {router_a.table_hash()[:19]}")
+    for seat in ("specialist", "orchestrator", "verifier"):
+        try:
+            model = router_a.model_for(seat)
+        except RoutingError:
+            continue
+        print(f"seat {seat}: {model.provider}/{model.model}")
     print(f"runner: {head}")
     cases = json.loads(DRIFT_PATH.read_text())["cases"]
     try:
@@ -112,31 +118,44 @@ def main(argv=None) -> int:
     eval_dir.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(eval_ledger_path(eval_dir), task_cap_nano=cap_nano,
                     daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
-    meta = MuseModel(meta_cfg)
-    ds = MuseModel(ds_cfg)
-    seats = (("A spec=meta orc=deepseek", meta, ds),
-             ("B spec=deepseek orc=meta", ds, meta))
+    swapped = dict(table)
+    swapped["specialist"] = table["orchestrator"]
+    swapped["orchestrator"] = table["specialist"]
+    try:
+        router_b = Router(swapped)
+    except RoutingError as exc:
+        print(f"refusing to run swapped seats: {exc}")
+        return 2
+    seats = (("A", router_a), ("B", router_b))
     report: dict = {"case": case["id"], "runner_commit": head,
                     "runs": []}
-    for label, spec_model, orc_model in seats:
-        task_id = f"smoke-{label[0].lower()}"
+    for label, router in seats:
+        task_id = f"smoke-{label.lower()}"
         contract = drift_contract(case)
+        spec = router.model_for("specialist")
+        orc = router.model_for("orchestrator")
+        assignment = (f"spec={spec.provider} orc={orc.provider}")
         result = run_live(case, task_id, tree, eval_dir / task_id,
                           ledger, contract,
                           scope_note=drift_note(case),
                           exactness_note=EXACTNESS_NOTE,
-                          quote_note=QUOTE_NOTE, spec_model=spec_model,
-                          orc_model=orc_model)
+                          quote_note=QUOTE_NOTE, router=router)
         ok, reasons = grade(case, result, tree)
         providers, wall_ms = providers_in(result["receipts_path"])
         spent = result.get("spent_nano", 0)
+        tiers = ledger.spend(task_id)["by_provider"]
         tag = "PASS" if ok else f"FAIL {reasons}"
-        print(f"{label}: {tag} providers={','.join(providers)}"
+        print(f"{label} {assignment}: {tag}"
+              f" providers={','.join(providers)}"
               f" ${spent / NANO_PER_USD:.4f} {wall_ms / 1000:.0f}s")
+        for tier, nano in sorted(tiers.items()):
+            print(f"  tier {tier}: ${nano / NANO_PER_USD:.4f}")
         report["runs"].append(
-            {"label": label, "pass": ok, "reasons": reasons,
-             "status": result["status"], "providers": providers,
-             "text": result["text"][:1000], "spent_nano": spent,
+            {"label": label, "assignment": assignment,
+             "routing": router.table_hash(), "pass": ok,
+             "reasons": reasons, "status": result["status"],
+             "providers": providers, "text": result["text"][:1000],
+             "spent_nano": spent, "by_provider": tiers,
              "wall_ms": wall_ms})
     totals = ledger.totals()
     ledger.close()

@@ -1,0 +1,5 @@
+{
+  "specialist": {"provider": "meta", "model": ""},
+  "orchestrator": {"provider": "deepseek", "model": "deepseek-chat"},
+  "same_provider_ok": false
+}

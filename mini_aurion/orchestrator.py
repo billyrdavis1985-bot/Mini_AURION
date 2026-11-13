@@ -32,7 +32,9 @@ class Orchestrator:
                  contract: TaskContract | None = None,
                  acceptance: tuple = (),
                  planner_prompt: str | None = None,
-                 judge_prompt: str | None = None):
+                 judge_prompt: str | None = None,
+                 verifier_model=None,
+                 routing_hash: str | None = None):
         """model_estimate_nano is required: 0 asserts the builder knows the
         model is free. Metering is never silently off. With a contract, the
         plan is validated against its criteria and completion requires every
@@ -51,27 +53,36 @@ class Orchestrator:
         self.acceptance = tuple(acceptance)
         self.planner_prompt = planner_prompt
         self.judge_prompt = judge_prompt
+        # The judge runs on the verifier seat: independence from the
+        # specialist is structural (different model object), not a hope.
+        # Verifier identity comes from the router via this constructor,
+        # never from a string an agent supplies.
+        self.verifier_model = verifier_model or model
+        self.routing_hash = routing_hash
         self.messages_used = 0
 
     def _complete(self, task_id: str, messages: list,
                   system: str | None = None,
-                  role: str = "complete") -> dict:
+                  role: str = "complete", model=None) -> dict:
+        model = model or self.model
         reservation = None
         if self.model_estimate_nano > 0:
             try:
-                reservation = self.ledger.reserve(task_id,
-                                                  self.model_estimate_nano)
+                reservation = self.ledger.reserve(
+                    task_id, self.model_estimate_nano,
+                    provider=getattr(model, "provider", ""),
+                    model=getattr(model, "model", ""))
             except LedgerError as exc:
                 raise _ModelRefused(str(exc)) from exc
         call_started = time.perf_counter()
         if system is None:
-            reply = self.model.complete(messages, tools=[])
+            reply = model.complete(messages, tools=[])
         else:
-            reply = self.model.complete(messages, tools=[],
-                                        system_prompt=system)
+            reply = model.complete(messages, tools=[],
+                                   system_prompt=system)
         call_ms = int((time.perf_counter() - call_started) * 1000)
         if reservation is not None:
-            actual = getattr(self.model, "last_cost_nano", 0) or 0
+            actual = getattr(model, "last_cost_nano", 0) or 0
             self.ledger.settle(reservation, actual)
         # The orchestrator's own calls are receipted like the
         # specialist's: without this the judge and synthesis are
@@ -79,8 +90,8 @@ class Orchestrator:
         self.receipts.append(
             agent_id=self.agent_id, task_id=task_id, action="model_call",
             detail={"finish": "answer", "role": role,
-                    "provider": getattr(self.model, "provider", "fixture"),
-                    "model": getattr(self.model, "model", "?"),
+                    "provider": getattr(model, "provider", "fixture"),
+                    "model": getattr(model, "model", "?"),
                     "duration_ms": call_ms},
             outcome="ok")
         return reply
@@ -91,6 +102,8 @@ class Orchestrator:
         start_detail: dict = {"question": question[:500]}
         if self.contract is not None:
             start_detail["contract"] = contract_hash(self.contract)
+        if self.routing_hash is not None:
+            start_detail["routing"] = self.routing_hash
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
                              action="task_start", detail=start_detail,
                              outcome="ok")
@@ -354,7 +367,8 @@ class Orchestrator:
             reply = self._complete(
                 task_id, [{"role": "question", "text": question},
                           {"role": "finding", "text": message.claim}],
-                system=self.judge_prompt, role="judge")
+                system=self.judge_prompt, role="judge",
+                model=self.verifier_model)
             verdict, _, reason = reply.get("text", "").partition(":")
             decision = verdict.strip().casefold()
             if decision not in ("relevant", "irrelevant"):

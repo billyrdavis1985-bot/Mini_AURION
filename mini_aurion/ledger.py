@@ -48,7 +48,18 @@ class Ledger:
             "CREATE TABLE IF NOT EXISTS reservations ("
             " id TEXT PRIMARY KEY, task_id TEXT NOT NULL,"
             " estimate_nano INTEGER NOT NULL, state TEXT NOT NULL,"
-            " actual_nano INTEGER, day TEXT NOT NULL, created_at TEXT NOT NULL)")
+            " actual_nano INTEGER, day TEXT NOT NULL, created_at TEXT NOT NULL,"
+            " provider TEXT NOT NULL DEFAULT '',"
+            " model TEXT NOT NULL DEFAULT '')")
+        # Older stores predate the tier columns; migrate in place so a
+        # kept ledger still reports per-tier spend after upgrade.
+        cols = {row[1] for row in
+                self.db.execute("PRAGMA table_info(reservations)")}
+        for col in ("provider", "model"):
+            if col not in cols:
+                self.db.execute(
+                    f"ALTER TABLE reservations ADD COLUMN {col} TEXT"
+                    " NOT NULL DEFAULT ''")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_res_task ON reservations(task_id)")
         self.db.execute(
@@ -84,7 +95,8 @@ class Ledger:
             f" WHERE {self._live_where()}").fetchone()
         return int(row[0])
 
-    def reserve(self, task_id: str, worst_case_nano: int) -> str:
+    def reserve(self, task_id: str, worst_case_nano: int,
+                provider: str = "", model: str = "") -> str:
         if not task_id or not isinstance(task_id, str):
             raise LedgerError("BAD_FIELD", "task_id must be a non-empty string")
         if not isinstance(worst_case_nano, int) or worst_case_nano <= 0:
@@ -106,9 +118,10 @@ class Ledger:
             rid = "rsv_" + uuid.uuid4().hex[:16]
             self.db.execute(
                 "INSERT INTO reservations (id, task_id, estimate_nano, state,"
-                " day, created_at) VALUES (?,?,?,?,?,?)",
+                " day, created_at, provider, model) VALUES (?,?,?,?,?,?,?,?)",
                 (rid, task_id, worst_case_nano, "reserved", day,
-                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                 provider, model))
         except Exception:
             self.db.execute("ROLLBACK")
             raise
@@ -147,6 +160,13 @@ class Ledger:
                         (reservation_id,))
         self.db.commit()
 
+    def _by_provider(self, where: str, args: tuple) -> dict:
+        rows = self.db.execute(
+            "SELECT provider, model, COALESCE(SUM(actual_nano),0)"
+            f" FROM reservations WHERE state='settled' AND {where}"
+            " GROUP BY provider, model", args).fetchall()
+        return {f"{prov}/{mod}": int(total) for prov, mod, total in rows}
+
     def spend(self, task_id: str) -> dict:
         """Settled + in-flight exposure for one task, in nano-USD."""
         settled = self.db.execute(
@@ -155,7 +175,8 @@ class Ledger:
         inflight = self.db.execute(
             "SELECT COALESCE(SUM(estimate_nano),0) FROM reservations"
             " WHERE task_id=? AND state='reserved'", (task_id,)).fetchone()[0]
-        return {"settled_nano": int(settled), "inflight_nano": int(inflight)}
+        return {"settled_nano": int(settled), "inflight_nano": int(inflight),
+                "by_provider": self._by_provider("task_id=?", (task_id,))}
 
     def totals(self) -> dict:
         settled = self.db.execute(
@@ -168,4 +189,5 @@ class Ledger:
             "SELECT COUNT(*) FROM reservations WHERE state='settled'"
             " AND actual_nano > estimate_nano").fetchone()[0]
         return {"settled_nano": int(settled), "inflight_nano": int(inflight),
-                "overruns": int(overruns)}
+                "overruns": int(overruns),
+                "by_provider": self._by_provider("1=1", ())}

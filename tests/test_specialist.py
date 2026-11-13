@@ -259,5 +259,14 @@ class SpecialistTests(unittest.TestCase):
             self.assertGreaterEqual(call["detail"]["duration_ms"], 0)
 
 
+    def test_model_reserve_carries_provider_identity(self):
+        self.investigate_with([{"text": "done",
+                                "evidence": [{"kind": "file",
+                                              "ref": "a.txt:1"}]}],
+                              model_estimate_nano=100)
+        tiers = self.ledger.spend("t1")["by_provider"]
+        self.assertEqual(tiers, {"fixture/fake": 0})
+
+
 if __name__ == "__main__":
     unittest.main()

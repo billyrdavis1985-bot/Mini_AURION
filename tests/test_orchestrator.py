@@ -59,7 +59,8 @@ class OrchestratorTests(unittest.TestCase):
     def build(self, plan_reply, spec_scripts, synth_text="done",
               budget=10, synth_evidence=None, contract=None,
               acceptance=(), planner_prompt=None, judge_prompt=None,
-              judge_text="RELEVANT: answers it"):
+              judge_text="RELEVANT: answers it", verifier_model=None,
+              routing_hash=None):
         synth = {"text": synth_text,
                  "evidence": synth_evidence
                  if synth_evidence is not None else GOOD_EVIDENCE}
@@ -87,7 +88,9 @@ class OrchestratorTests(unittest.TestCase):
                            model_estimate_nano=0, contract=contract,
                            acceptance=acceptance,
                            planner_prompt=planner_prompt,
-                           judge_prompt=judge_prompt)
+                           judge_prompt=judge_prompt,
+                           verifier_model=verifier_model,
+                           routing_hash=routing_hash)
         self.last_orc_model = orc_model
         return orc
 
@@ -398,6 +401,27 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(len(ends), 1)
         self.assertIsInstance(ends[0]["detail"]["duration_ms"], int)
         self.assertGreaterEqual(ends[0]["detail"]["duration_ms"], 0)
+
+
+    def test_judge_runs_on_the_verifier_seat(self):
+        from mini_aurion.fixture import FakeModel
+        verifier = FakeModel([{"text": "RELEVANT: yes"}])
+        verifier.provider = "prov-verifier"
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]}, synth_text="A",
+            judge_prompt="judge", verifier_model=verifier,
+            routing_hash="sha256:abc")
+        orc.run("t1", "question?")
+        judges = [r for r in self.receipts.read_all()
+                  if r["action"] == "model_call"
+                  and r["detail"].get("role") == "judge"]
+        self.assertEqual(len(judges), 1)
+        self.assertEqual(judges[0]["detail"]["provider"],
+                         "prov-verifier")
+        starts = [r for r in self.receipts.read_all()
+                  if r["action"] == "task_start"]
+        self.assertEqual(starts[0]["detail"]["routing"], "sha256:abc")
 
 
 if __name__ == "__main__":
