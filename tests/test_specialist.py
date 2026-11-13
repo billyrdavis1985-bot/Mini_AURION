@@ -245,5 +245,19 @@ class SpecialistTests(unittest.TestCase):
         self.assertIn("spend cap refused", msg.claim)
 
 
+    def test_model_call_receipt_names_provider_and_time(self):
+        self.investigate_with([{"text": "done",
+                                "evidence": [{"kind": "file",
+                                              "ref": "a.txt:1"}]}])
+        calls = [r for r in self.receipts.read_all()
+                 if r["action"] == "model_call"]
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertEqual(call["detail"]["provider"], "fixture")
+            self.assertEqual(call["detail"]["model"], "fake")
+            self.assertIsInstance(call["detail"]["duration_ms"], int)
+            self.assertGreaterEqual(call["detail"]["duration_ms"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

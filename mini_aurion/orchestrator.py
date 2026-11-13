@@ -9,6 +9,8 @@ chatter is capped by a message budget.
 """
 from __future__ import annotations
 
+import time
+
 from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
 from .messages import AgentMessage
@@ -72,6 +74,7 @@ class Orchestrator:
 
     def run(self, task_id: str, question: str) -> dict:
         self.messages_used = 0
+        self._run_started = time.perf_counter()
         start_detail: dict = {"question": question[:500]}
         if self.contract is not None:
             start_detail["contract"] = contract_hash(self.contract)
@@ -84,7 +87,8 @@ class Orchestrator:
             self.receipts.append(
                 agent_id=self.agent_id, task_id=task_id, action="task_end",
                 detail={"status": "escalated",
-                        "error": f"{type(exc).__name__}: {exc}"[:300]},
+                        "error": f"{type(exc).__name__}: {exc}"[:300],
+                        "duration_ms": self._run_ms()},
                 outcome="escalated")
             try:
                 cost_nano = self.ledger.spend(task_id)["settled_nano"]
@@ -120,6 +124,19 @@ class Orchestrator:
                     [], f"plan refused: {exc}", cause="cap")
         subtasks, refused = self._validate_plan(
             task_id, plan.get("subtasks", []), question)
+        if refused and not subtasks:
+            plan_verdict = "refused"
+        elif refused:
+            plan_verdict = "partial"
+        else:
+            plan_verdict = "accepted"
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="plan",
+            detail={"verdict": plan_verdict,
+                    "subtasks": [sub.get("id", "?") for sub in subtasks
+                                 if isinstance(sub, dict)],
+                    "refused": [f["subtask"] for f in refused]},
+            outcome="ok" if subtasks else "denied")
         findings: list[dict] = refused
         unattempted: list[str] = []
         for sub in subtasks:
@@ -175,6 +192,12 @@ class Orchestrator:
         return self._finish(task_id, findings, unattempted, "partial",
                             fallback, evidence, synth_note)
 
+    def _run_ms(self) -> int:
+        started = getattr(self, "_run_started", None)
+        if started is None:
+            return 0
+        return int((time.perf_counter() - started) * 1000)
+
     def _finish(self, task_id: str, findings: list, unattempted: list,
                 status: str, text: str, evidence: list, note: str,
                 cause: str = "model") -> dict:
@@ -198,7 +221,8 @@ class Orchestrator:
                         "accepted": [f["subtask"] for f in findings
                                      if f["status"] == "accepted"],
                         "unattempted": unattempted,
-                        "acceptance": results}
+                        "acceptance": results,
+                        "duration_ms": self._run_ms()}
         if note:
             detail["note"] = note
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
