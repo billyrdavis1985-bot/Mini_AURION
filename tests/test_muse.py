@@ -150,8 +150,17 @@ class MuseTests(unittest.TestCase):
         self.assertEqual(model.last_cost_nano, 337_500)
         sent = ScriptedHandler.requests[0]
         self.assertEqual(sent["auth"], "Bearer test-key")
-        self.assertEqual(sent["body"]["tool_choice"], "auto")
+        self.assertNotIn("tool_choice", sent["body"])
         self.assertEqual(sent["body"]["model"], "muse-spark-1.1")
+
+    def test_tool_choice_rides_only_with_tools(self):
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(self.config).complete(
+            [{"role": "user", "text": "hi"}],
+            [{"name": "r", "description": "R.", "parameters": {}}])
+        sent = ScriptedHandler.requests[0]
+        self.assertEqual(sent["body"]["tool_choice"], "auto")
+        self.assertEqual(len(sent["body"]["tools"]), 1)
 
     def test_json_answer_parses(self):
         ScriptedHandler.script.append((200, answer(

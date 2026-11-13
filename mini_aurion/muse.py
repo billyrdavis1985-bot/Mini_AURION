@@ -294,8 +294,11 @@ class MuseModel:
                 "messages": [{"role": "system",
                               "content": system_prompt or SYSTEM_PROMPT}]
                 + [_api_message(m) for m in messages],
-                tokens_field: self.config.max_output_tokens,
-                "tool_choice": "auto"}
+                tokens_field: self.config.max_output_tokens}
+        # tool_choice rides only with tools: gpt-5-mini 400s on a bare
+        # tool_choice with no tools array (measured live).
+        if tools:
+            body["tool_choice"] = "auto"
         if row_temp is not None:
             body["temperature"] = row_temp
         if tools:
