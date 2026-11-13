@@ -84,6 +84,24 @@ class MuseTests(unittest.TestCase):
         self.assertIn("read_file", content)
         self.assertIn("a.txt", content)
 
+    def test_token_cap_field_is_per_provider(self):
+        port = self.server.server_address[1]
+        openai = MuseConfig(
+            api_key="k", base_url=f"http://127.0.0.1:{port}/v1",
+            model="m", input_usd_per_m="1", output_usd_per_m="1",
+            provider="openai")
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(openai).complete([{"role": "user", "text": "hi"}], [])
+        body = ScriptedHandler.requests[0]["body"]
+        self.assertIn("max_completion_tokens", body)
+        self.assertNotIn("max_tokens", body)
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(self.config).complete(
+            [{"role": "user", "text": "hi"}], [])
+        body = ScriptedHandler.requests[1]["body"]
+        self.assertIn("max_tokens", body)
+        self.assertNotIn("max_completion_tokens", body)
+
     def test_system_prompt_override_reaches_the_api(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
         MuseModel(self.config).complete([{"role": "user", "text": "hi"}], [],
