@@ -198,6 +198,22 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(parsed["orchestrator"]["provider"], "meta")
         self.assertFalse(parsed["same_provider_ok"])
 
+    def test_shipped_local_table_is_valid(self):
+        root = Path(__file__).resolve().parent.parent
+        parsed = load_routing_table(
+            root / "eval" / "routing-local.json")
+        self.assertEqual(parsed["specialist"]["provider"], "local")
+        self.assertEqual(parsed["orchestrator"]["provider"], "meta")
+        self.assertFalse(parsed["same_provider_ok"])
+
+    def test_shipped_openai_table_is_valid(self):
+        root = Path(__file__).resolve().parent.parent
+        parsed = load_routing_table(
+            root / "eval" / "routing-openai.json")
+        self.assertEqual(parsed["specialist"]["provider"], "openai")
+        self.assertEqual(parsed["orchestrator"]["provider"], "meta")
+        self.assertFalse(parsed["same_provider_ok"])
+
     def test_shipped_google_table_is_valid(self):
         root = Path(__file__).resolve().parent.parent
         parsed = load_routing_table(

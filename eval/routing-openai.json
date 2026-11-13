@@ -1,0 +1,5 @@
+{
+  "specialist": {"provider": "openai", "model": ""},
+  "orchestrator": {"provider": "meta", "model": ""},
+  "same_provider_ok": false
+}
