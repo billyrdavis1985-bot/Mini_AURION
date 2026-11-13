@@ -144,7 +144,8 @@ PROVIDERS = {
                "model_default": "",
                "price_in_env": "MINI_AURION_OPENAI_PRICE_IN",
                "price_out_env": "MINI_AURION_OPENAI_PRICE_OUT",
-               "price_in_default": "", "price_out_default": ""},
+               "price_in_default": "", "price_out_default": "",
+               "tokens_field": "max_completion_tokens"},
     "deepseek": {"key_env": "DEEPSEEK_API_KEY",
                  "base_url_env": "MINI_AURION_DEEPSEEK_BASE_URL",
                  "base_url_default": "https://api.deepseek.com/v1",
@@ -152,14 +153,16 @@ PROVIDERS = {
                  "model_default": "",
                  "price_in_env": "MINI_AURION_DEEPSEEK_PRICE_IN",
                  "price_out_env": "MINI_AURION_DEEPSEEK_PRICE_OUT",
-                 "price_in_default": "", "price_out_default": ""},
+                 "price_in_default": "", "price_out_default": "",
+               "tokens_field": "max_tokens"},
     "local": {"key_env": None,
               "base_url_env": "MINI_AURION_LOCAL_BASE_URL",
               "base_url_default": "http://127.0.0.1:11434/v1",
               "model_env": "MINI_AURION_LOCAL_MODEL",
               "model_default": "",
               "price_in_env": None, "price_out_env": None,
-              "price_in_default": "0", "price_out_default": "0"},
+              "price_in_default": "0", "price_out_default": "0",
+              "tokens_field": "max_tokens"},
 }
 
 
@@ -273,11 +276,17 @@ class MuseModel:
     def complete(self, messages: list, tools: list,
                  system_prompt: str | None = None) -> dict:
         self.calls += 1
+        # Newer OpenAI models 400 on max_tokens (measured live:
+        # unsupported_parameter); they take max_completion_tokens.
+        # Meta, DeepSeek, and local servers still take max_tokens,
+        # so the field is per provider, not per family.
+        tokens_field = PROVIDERS.get(self.config.provider, {}).get(
+            "tokens_field", "max_tokens")
         body = {"model": self.config.model,
                 "messages": [{"role": "system",
                               "content": system_prompt or SYSTEM_PROMPT}]
                 + [_api_message(m) for m in messages],
-                "max_tokens": self.config.max_output_tokens,
+                tokens_field: self.config.max_output_tokens,
                 "temperature": self.config.temperature,
                 "tool_choice": "auto"}
         if tools:
