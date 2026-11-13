@@ -1,0 +1,5 @@
+{
+  "specialist": {"provider": "anthropic", "model": ""},
+  "orchestrator": {"provider": "meta", "model": ""},
+  "same_provider_ok": false
+}

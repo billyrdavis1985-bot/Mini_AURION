@@ -19,9 +19,13 @@ import hashlib
 import json
 from pathlib import Path
 
+from .anthropic import AnthropicConfig, AnthropicModel
 from .muse import PROVIDERS, MuseConfig, MuseModel
 
 SEATS = ("specialist", "orchestrator", "verifier")
+# Native wire shapes, one config+model pair each. Everything else goes
+# through the OpenAI-compatible family in muse.PROVIDERS.
+NATIVE = {"anthropic": (AnthropicConfig, AnthropicModel)}
 
 
 class RoutingError(Exception):
@@ -75,23 +79,28 @@ class Router:
             if seat not in table:
                 continue
             provider = table[seat]["provider"]
-            if provider != "meta" and provider not in PROVIDERS:
+            if provider != "meta" and provider not in PROVIDERS \
+                    and provider not in NATIVE:
                 raise RoutingError("BAD_PROVIDER",
                                    f"seat {seat!r}: unknown provider"
                                    f" {provider!r}")
             overrides = {}
             if table[seat].get("model", ""):
                 overrides["model"] = table[seat]["model"]
+            model_cls = MuseModel
             try:
                 if provider == "meta":
                     config = MuseConfig.from_env(environ, **overrides)
+                elif provider in NATIVE:
+                    config_cls, model_cls = NATIVE[provider]
+                    config = config_cls.from_env(environ, **overrides)
                 else:
                     config = MuseConfig.from_env(
                         environ, provider=provider, **overrides)
             except Exception as exc:
                 raise RoutingError("NO_MODEL",
                                    f"seat {seat!r}: {exc}") from exc
-            self.models[seat] = MuseModel(config)
+            self.models[seat] = model_cls(config)
         judge_seat = "verifier" if "verifier" in self.models \
             else "orchestrator"
         if self.models["specialist"].provider == \
