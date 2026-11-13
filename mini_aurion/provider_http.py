@@ -11,9 +11,11 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import json
+import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from .specialist import MAX_TOOL_CHARS
@@ -124,6 +126,20 @@ def short_http_error(exc: urllib.error.HTTPError) -> str:
         return f"HTTP {exc.code}"
 
 
+def _maybe_dump_body(request) -> None:
+    """Operator-gated request capture. When a provider 400s a body the
+    fake server accepted, guessing wastes rounds: set
+    MINI_AURION_DEBUG_BODY to a path and the exact bytes land there.
+    Off unless the operator asks; never in receipts."""
+    path = os.environ.get("MINI_AURION_DEBUG_BODY", "")
+    if not path:
+        return
+    try:
+        Path(path).write_bytes(request.data or b"")
+    except OSError:
+        pass
+
+
 def post_json(opener, request, timeout_seconds: float,
               max_response_bytes: int, error) -> dict:
     """Send one POST and decode the JSON body, fail-closed."""
@@ -131,6 +147,7 @@ def post_json(opener, request, timeout_seconds: float,
         with opener.open(request, timeout=timeout_seconds) as resp:
             payload = resp.read(max_response_bytes + 1)
     except urllib.error.HTTPError as exc:
+        _maybe_dump_body(request)
         raise error("HTTP_ERROR", short_http_error(exc)) from exc
     except (urllib.error.URLError, http.client.HTTPException,
             TimeoutError, OSError) as exc:
