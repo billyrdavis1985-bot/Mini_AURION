@@ -3,6 +3,7 @@ import http.server
 import json
 import threading
 import unittest
+from unittest import mock
 
 from mini_aurion import muse as muse_mod
 from mini_aurion.critic import Critic
@@ -191,6 +192,19 @@ class MuseTests(unittest.TestCase):
         with self.assertRaises(MuseError) as ctx:
             MuseModel(bad).complete([], [])
         self.assertEqual(ctx.exception.code, "TRANSPORT_FAILED")
+
+    def test_debug_body_dump_captures_the_request(self):
+        out = os.path.join(self.tmp.name, "body.json")
+        ScriptedHandler.script.append(
+            (400, {"error": {"type": "invalid_request"}}))
+        with mock.patch.dict(os.environ,
+                                      {"MINI_AURION_DEBUG_BODY": out}):
+            with self.assertRaises(MuseError):
+                MuseModel(self.config).complete(
+                    [{"role": "user", "text": "hi"}], [])
+        sent = json.loads(open(out, encoding="utf-8").read())
+        self.assertEqual(sent["messages"][-1]["content"], "hi")
+        self.assertNotIn("MINI_AURION_DEBUG_BODY", os.environ)
 
     def test_bad_base_url_is_refused(self):
         with self.assertRaises(MuseError) as ctx:

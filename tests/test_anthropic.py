@@ -79,6 +79,8 @@ class AnthropicTests(unittest.TestCase):
         self.assertEqual(body["messages"],
                          [{"role": "user", "content": "hi"}])
         self.assertIn("max_tokens", body)
+        # This model 400s on the field (measured live), so it stays out.
+        self.assertNotIn("temperature", body)
 
     def test_consecutive_user_turns_merge(self):
         ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
@@ -153,6 +155,7 @@ class AnthropicTests(unittest.TestCase):
                 [{"role": "user", "text": "go"}], [])
         self.assertEqual(ctx.exception.code, "HTTP_ERROR")
         self.assertIn("HTTP 400", str(ctx.exception))
+
 
     def test_dead_server_raises_transport(self):
         config = AnthropicConfig(
