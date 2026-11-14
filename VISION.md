@@ -29,7 +29,7 @@ and probabilities, which is why the later milestones exist.
 | Research system | Open questions answered from real outside sources, not only the repo's own code | Not started | B2 demo |
 | Multi-agent | Agents that build on each other's **verified** findings through shared memory, not one model wearing several hats | In name only | B3 demo |
 | Autonomous workflow | A task runs several steps without the operator between them, inside stage bounds | Partial (single task, read-only) | B3 demo + M7 |
-| Operator control | Kill switch, caps and approvals with a surface the operator can use | Not started | Monitor demo |
+| Operator control | Kill switch, caps and approvals with a surface the operator can use | **Built** | `docs/demos/monitor.md` |
 
 A row moves only by a PR that says, in its capability line, which row it
 moves. The reviewer checks that line first.

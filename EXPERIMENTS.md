@@ -196,3 +196,33 @@ kept (OPERATIONS section 7).
 - **Lesson (pipeline):** per-tier ledger columns plus per-call
   receipts make the split visible instead of arguable. Closes F6's
   timing gap for per-call and per-task seconds.
+
+## F12. The kill switch works; the browser is the threat model
+
+- **Tried:** Monitor milestone (#70 foundation, #71 app, #74 K1–K3):
+  a loopback operator console with kill, caps, and approvals as its
+  only writes. Demo: live code-qa eval killed mid-call from the Live
+  view (`docs/demos/monitor.md`).
+- **Result:** kill receipt seq 21 chained onto the victim task, one
+  in-flight reservation ($0.0175) refunded, proc marked killed, second
+  kill refused. Review found the real holes first: loopback stops
+  other machines but not the operator's own browser, so any open page
+  could POST caps and approvals (K1), a rebinding name could read
+  receipts (K2), and the caps form could name a ledger outside the
+  watched root (K3). All three are now refused and pinned as tests.
+  Two platform traps along the way: `os.kill(pid, 0)` on Windows
+  sends Ctrl+C (signal 0 *is* CTRL_C_EVENT), and an unclosed ledger
+  handle blocks temp cleanup there.
+- **Cost:** the untouched full eval before the demo, $0.726 over
+  686 s; the killed run's four passing runs on top (no summary line;
+  the process died first).
+- **Lesson (agents, portable):** an operator console's attacker is
+  the operator's own browser, not the network. Origin checks plus a
+  per-process token plus Host checks are the minimum for any local
+  control surface AURION grows, and the tests must behave like the
+  browser (Origin + token) or they prove nothing.
+- **Lesson (pipeline):** the demo caught no model problem and one
+  measurement artifact: the same full eval scored 1/5 under a
+  `service_overloaded` outage, which is provider weather, not a
+  regression. Score lines from outage runs should be annotated, not
+  compared.
