@@ -8,6 +8,7 @@ import http.server
 import json
 import os
 import socket
+import ssl
 import sys
 import tempfile
 import threading
@@ -257,6 +258,11 @@ class FetchIntegrationTests(unittest.TestCase):
             pass
 
         class FakeContext:
+            # Matching the attributes HTTPSConnection reads at
+            # construction (3.11 reads verify_mode; newer keeps it).
+            verify_mode = ssl.CERT_REQUIRED
+            check_hostname = True
+
             def wrap_socket(self, sock, server_hostname=None):
                 wrapped.append(server_hostname)
                 return sock
