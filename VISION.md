@@ -44,7 +44,7 @@ capability (OPERATIONS section 2).
 | --- | --- | --- |
 | **B1 Tiers** | Provider interface, router (role to provider+model), per-provider pricing in the ledger. OpenAI-compatible family first (OpenAI, DeepSeek, Meta, local), then native adapters (Anthropic, Google) — all verified live (F9-F11; local connected, answer quality model-bound). | One task where a cheap model investigates and a model from a **different provider** verifies; the ledger shows each tier's cost and the receipts show which model did what. Spec: `docs/tasks/B1-tiers.md`. |
 | **Monitor** | Local, read-only web app over the state directory; kill switch, caps, approvals as the only writes. | Operator watches a live task, reads its receipts, and kills it from the app. Spec: `docs/tasks/monitor.md`. |
-| **B2 Research** | `fetch_url` read tool (memory already tracks fetched URLs), a research task class, ADR-003 on verifying predictive claims (provenance now, calibration over time). | A cited brief on one real question, built from pages actually fetched, with every claim's provenance receipted. |
+| **B2 Research** | `fetch_url` read tool (memory already tracks fetched URLs), a research task class, ADR-003 on verifying predictive claims (provenance now, calibration over time). | A cited brief on one real question, built from pages actually fetched, with every claim's provenance receipted. The brief also carries one planted unsupported claim; the demo records whether the cross-provider verifier flagged it. Either result is recorded as a finding; it is not a pass/fail gate. |
 | **B3 Collaboration** | Specialists in parallel; verified notes written to shared memory; a synthesizer that builds only on verified notes. | Several agents on one question, visibly building on each other's verified findings; wall-clock shows the parallel gain. |
 | **M7 Autonomy prerequisites** | Saved state and resume, process-level kill, dead-man's switch, receipt store agents cannot write. | Required before any WRITE or EXTERNAL capability. Partly delivered by the monitor. |
 
@@ -55,7 +55,9 @@ capability (OPERATIONS section 2).
    hardening. (`.github/pull_request_template.md`)
 2. **Hardening budget.** At most one hardening or eval PR per build PR
    inside a milestone. The reviewer computes the ratio from git at each
-   review.
+   review. A fix found while qualifying a just-built feature live counts
+   as finishing that feature, not as hardening, when it lands in the same
+   milestone and its PR names the feature.
 3. **No new eval sets or gates** unless a milestone's demo needs one.
 4. **Reviewer order.** Vision first (does the PR move a row), blocking
    problems second (correctness, safety, money), everything else to
@@ -72,9 +74,19 @@ per model call (`model_call`), runners print seconds next to dollars.
 Every finding from then on carries three numbers: dollars, seconds,
 and the outcome.
 
-## Open questions for the operator
+**The open question the tiers exist to answer:** does a verifier on a
+different provider catch errors the investigator makes? B1 proved the
+seats connect; it did not test this. The judge today is a relevance
+flag, and a passing run only shows the verifier did not spoil a correct
+answer (F11 run B). B2's demo answers it once, with a planted
+unsupported claim. Later milestones measure it properly if the first
+result is interesting.
 
-- PRAXIS: a one-paragraph description of its architecture, so findings
-  can be tagged for it.
-- B2's first real question, in the operator's own domain.
-- Which local models (and serving stack) count as the "cheap tier" for B1.
+## Open questions and owners
+
+| Question | Owner | Needed by |
+| --- | --- | --- |
+| ADR-003: how predictive and probabilistic claims are verified (provenance now, calibration over time), and what the verifier seat checks beyond relevance | reviewer drafts, operator approves | end of Monitor (blocks B2) |
+| B2's first real research question, in the operator's own domain | operator | end of Monitor (blocks B2) |
+| PRAXIS: a one-paragraph description of its architecture, so findings can be tagged for it | operator | before B3 |
+| A local model strong enough to investigate, or local stays a $0 support seat (F11) | operator | no deadline; DeepSeek is the cheap investigation seat meanwhile |
