@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -85,6 +86,50 @@ class ReceiptTests(unittest.TestCase):
             self.store.append(agent_id="a", task_id="t", action="act",
                               detail={"bad": object()})
         self.assertEqual(ctx.exception.code, "NOT_JSON")
+
+
+    def test_fast_append_matches_slow_scan_results(self):
+        for i in range(50):
+            self.store.append(agent_id="orc", task_id="t1",
+                              action=f"step-{i}")
+        self.assertEqual(self.store.verify(), 50)
+        anchor = json.loads(open(str(self.store.path) + ".anchor").read())
+        self.assertEqual(anchor["max_seq"], 50)
+
+    def test_crash_between_line_and_anchor_heals_on_next_append(self):
+        first = self.store.append(agent_id="orc", task_id="t1",
+                                  action="one")
+        # A crash after the line write but before the anchor write
+        # leaves a receipt the anchor never saw; the next append
+        # must keep its seq and continue the chain, not reuse it.
+        anchor_path = str(self.store.path) + ".anchor"
+        before = json.loads(open(anchor_path).read())
+        assert before["max_seq"] == 1
+        raw = {"schema": "mini-aurion.receipt.v1", "seq": 2,
+               "task_id": "t1", "agent_id": "orc", "action": "two",
+               "tool": "", "outcome": "ok", "policy_version": "m0",
+               "prev_hash": first["hash"],
+               "hash": "sha256:" + "0" * 64, "cost_nano": 0,
+               "ts": "2026-01-01T00:00:00Z", "detail": {}}
+        with open(str(self.store.path), "a") as fh:
+            fh.write(json.dumps(raw, sort_keys=True) + "\n")
+        third = self.store.append(agent_id="orc", task_id="t1",
+                                  action="three")
+        self.assertEqual(third["seq"], 3)
+        self.assertEqual(third["prev_hash"], raw["hash"])
+
+    def test_index_tails_newest_first_and_rebuilds(self):
+        for i in range(5):
+            self.store.append(agent_id="a", task_id="t1", action=f"s{i}")
+        self.assertEqual(self.store.index_count(), 5)
+        tail = self.store.index_tail(limit=2)
+        self.assertEqual([r["seq"] for r in tail], [5, 4])
+        self.assertEqual(tail[0]["action"], "s4")
+        os.unlink(str(self.store.index_path))
+        self.assertEqual(self.store.index_count(), 0)
+        self.assertEqual(self.store.index_tail(), [])
+        self.assertEqual(self.store.index_rebuild(), 5)
+        self.assertEqual(self.store.index_count(), 5)
 
 
 class SettleTests(unittest.TestCase):

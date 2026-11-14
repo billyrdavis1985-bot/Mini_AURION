@@ -143,6 +143,30 @@ class RouterTests(unittest.TestCase):
         self.assertNotEqual(left.table_hash(), changed.table_hash())
 
 
+    def test_resolved_names_the_models_that_will_run(self):
+        router = Router(table(
+            specialist={"provider": "local", "model": "spec-m"},
+            orchestrator={"provider": "local", "model": "orc-m"},
+            same_provider_ok=True), environ=dict(LOCAL_ENV))
+        self.assertEqual(router.resolved(), {
+            "specialist": {"provider": "local", "model": "spec-m"},
+            "orchestrator": {"provider": "local", "model": "orc-m"}})
+
+    def test_hash_moves_when_only_the_environment_model_changes(self):
+        # Same table text, different resolved model: the transcript
+        # must tell them apart, or the Monitor shows the wrong seat.
+        blank = {"provider": "local", "model": ""}
+        left = Router(table(
+            specialist=dict(blank), orchestrator=dict(blank),
+            same_provider_ok=True),
+            environ={"MINI_AURION_LOCAL_MODEL": "one"})
+        right = Router(table(
+            specialist=dict(blank), orchestrator=dict(blank),
+            same_provider_ok=True),
+            environ={"MINI_AURION_LOCAL_MODEL": "two"})
+        self.assertEqual(left.table, right.table)
+        self.assertNotEqual(left.table_hash(), right.table_hash())
+
     def test_native_seat_builds_from_env(self):
         env = {"ANTHROPIC_API_KEY": "fake",
                "MINI_AURION_ANTHROPIC_MODEL": "m",

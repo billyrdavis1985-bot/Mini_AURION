@@ -142,5 +142,46 @@ class LedgerTests(unittest.TestCase):
             migrated.close()
 
 
+
+    def test_caps_survive_reopen_and_ignore_later_constructors(self):
+        self.ledger.close()
+        path = os.path.join(self.tmp.name, "l.sqlite3")
+        reopened = Ledger(path, task_cap_nano=1, daily_cap_nano=2,
+                          global_cap_nano=3)
+        try:
+            self.assertEqual((reopened.task_cap, reopened.daily_cap,
+                              reopened.global_cap), (10_000, 50_000, 100_000))
+        finally:
+            reopened.close()
+
+    def test_open_refuses_a_path_that_has_no_ledger(self):
+        with self.assertRaises(LedgerError) as ctx:
+            Ledger.open(os.path.join(self.tmp.name, "missing.sqlite3"))
+        self.assertEqual(ctx.exception.code, "NO_CAPS")
+
+    def test_a_lowered_cap_bites_a_live_reserver_immediately(self):
+        # The monitor's caps edit must hit the running process, not
+        # the next one: reserve re-reads the caps table every call.
+        path = os.path.join(self.tmp.name, "l.sqlite3")
+        monitor = Ledger.open(path)
+        try:
+            monitor.set_caps(task=100)
+            with self.assertRaises(LedgerError) as ctx:
+                self.ledger.reserve("t1", 1_000)
+            self.assertEqual(ctx.exception.code, "CAP_EXCEEDED")
+        finally:
+            monitor.close()
+
+    def test_refund_task_releases_only_that_tasks_inflight(self):
+        mine = self.ledger.reserve("t1", 4_000)
+        self.ledger.reserve("t2", 2_000)
+        settled = self.ledger.reserve("t1", 1_000)
+        self.ledger.settle(settled, 500)
+        out = self.ledger.refund_task("t1")
+        self.assertEqual(out, {"count": 1, "released_nano": 4_000})
+        with self.assertRaises(LedgerError) as ctx:
+            self.ledger.settle(mine, 1)
+        self.assertEqual(ctx.exception.code, "BAD_STATE")
+        self.assertEqual(self.ledger.spend("t2")["inflight_nano"], 2_000)
 if __name__ == "__main__":
     unittest.main()

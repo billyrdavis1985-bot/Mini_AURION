@@ -254,6 +254,29 @@ class ReviewFindingsPR11(_LiveHarness):
                         and "earlier" in (state / "receipts.jsonl").read_text(),
                         "the earlier run's receipts were deleted")
 
+    def test_run_live_registers_its_process_for_the_monitor(self):
+        state = Path(self.dir) / "state" / "qa-x-r1"
+        led = Ledger(os.path.join(self.dir, "eval-l.db"), task_cap_nano=BIG,
+                     daily_cap_nano=BIG, global_cap_nano=BIG)
+        env = {"MODEL_API_KEY": "test-key",
+               "MINI_AURION_MUSE_BASE_URL": self.base_url}
+        try:
+            with mock.patch.dict(os.environ, env):
+                grade_code_qa.run_live(
+                    {"id": "qa-x", "type": "unanswerable", "question": "q"},
+                    "qa-x-r1", Path(self.corpus), state, led,
+                    load_contract(grade_code_qa.CONTRACT_PATH, "q"))
+        finally:
+            led.close()
+        proc = json.loads((state / "proc.json").read_text())
+        self.assertEqual(proc["task_id"], "qa-x-r1")
+        self.assertEqual(proc["pid"], os.getpid())
+        self.assertEqual(proc["status"], "ended")
+        self.assertTrue(Path(proc["receipts"]).exists())
+        self.assertTrue(Path(proc["ledger"]).exists())
+        self.assertIn("specialist", proc["seats"])
+        self.assertIn("provider", proc["seats"]["specialist"])
+
     def test_scope_note_lands_in_the_brief(self):
         state = Path(self.dir) / "state" / "qa-x-r1"
         led = Ledger(os.path.join(self.dir, "eval-l.db"), task_cap_nano=BIG,
