@@ -18,6 +18,7 @@ milestone needs it (VISION.md rule 4).
 | Debug request dump (`MINI_AURION_DEBUG_BODY`) writes prompt contents with default file permissions | B1 review (#60) | when next touched |
 | EXPERIMENTS.md entries out of order (F7, F11, F10, F9, F8) | B1 review | when next touched |
 | Stronger G2: reader shows only files tracked at the frozen commit | PR #20 | when eval trees are reused |
+| `kill_task` signals the pid in `proc.json`; a dead pid reused by the OS would hit an unrelated process. Close by recording process start time and checking before signalling. | #72 backlog note | when next touched |
 
 ## Closed
 
