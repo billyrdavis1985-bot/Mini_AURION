@@ -75,7 +75,6 @@ class MonitorAcceptsOnlyItsOwnPages(unittest.TestCase):
         finally:
             ledger.close()
 
-    @unittest.expectedFailure
     def test_K1_a_foreign_page_cannot_change_caps(self):
         """A hidden form on any web page posts to /caps with the
         browser's Origin and Referer naming that page. Today the Monitor
@@ -98,7 +97,6 @@ class MonitorAcceptsOnlyItsOwnPages(unittest.TestCase):
         self.assertEqual(self._global_cap(), CAP,
                          "a foreign page changed the spend cap")
 
-    @unittest.expectedFailure
     def test_K2_a_rebinding_host_is_refused(self):
         """DNS rebinding: a page on rebind.evil.example re-resolves its
         own name to 127.0.0.1, then reads the Monitor same-origin
@@ -112,7 +110,6 @@ class MonitorAcceptsOnlyItsOwnPages(unittest.TestCase):
         self.assertGreaterEqual(status, 400,
                                 "served the Monitor to a foreign Host")
 
-    @unittest.expectedFailure
     def test_K3_caps_edits_stay_inside_the_watched_root(self):
         """/caps takes the ledger path from the form and Ledger.open
         accepts any existing file, so the request created `reservations`

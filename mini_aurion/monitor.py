@@ -12,9 +12,11 @@ then open http://127.0.0.1:8787/ in a browser.
 """
 from __future__ import annotations
 
+import hmac
 import html
 import json
 import os
+import secrets
 import signal
 import sqlite3
 import threading
@@ -294,7 +296,7 @@ def _nano_usd(nano: int) -> str:
     return f"${nano / 1_000_000_000:.4f}"
 
 
-def render_live(root: Path) -> bytes:
+def render_live(root: Path, token: str) -> bytes:
     tasks = find_tasks(root)
     rows = []
     for proc in tasks:
@@ -323,6 +325,7 @@ def render_live(root: Path) -> bytes:
             flag = ' <span class="bad">DIED</span>'
         kill = (f'<form method="post" action="/kill">'
                 f'<input type="hidden" name="task" value="{html.escape(tid)}">'
+                f'<input type="hidden" name="token" value="{token}">'
                 f'<button type="submit">kill</button></form>'
                 if status == "running" else "")
         rows.append(
@@ -339,6 +342,8 @@ def render_live(root: Path) -> bytes:
             f'<form method="post" action="/caps">'
             f'<input type="hidden" name="ledger"'
             f' value="{html.escape(proc.get("ledger", ""))}">'
+            f'<input type="hidden" name="token"'
+            f' value="{token}">'
             f'<input type="text" name="task" size="12">'
             f"<button>set</button></form></td>"
             f"<td>{kill}</td></tr>")
@@ -423,7 +428,7 @@ def render_experiments(root: Path) -> bytes:
     return _page("Experiments", body)
 
 
-def render_approvals(root: Path) -> bytes:
+def render_approvals(root: Path, token: str) -> bytes:
     rows = []
     for row in pending_approvals(root):
         rid = row["id"]
@@ -437,10 +442,12 @@ def render_approvals(root: Path) -> bytes:
             f'<td><form method="post" action="/approve">'
             f'<input type="hidden" name="id" value="{html.escape(rid)}">'
             f'<input type="hidden" name="decision" value="approved">'
+            f'<input type="hidden" name="token" value="{token}">'
             f'<button type="submit">approve</button></form> '
             f'<form method="post" action="/approve">'
             f'<input type="hidden" name="id" value="{html.escape(rid)}">'
             f'<input type="hidden" name="decision" value="denied">'
+            f'<input type="hidden" name="token" value="{token}">'
             f'<button type="submit">deny</button></form></td></tr>')
     if not rows:
         return _page("Approvals", "<p>nothing pending.</p>")
@@ -451,10 +458,40 @@ def render_approvals(root: Path) -> bytes:
 
 class Handler(BaseHTTPRequestHandler):
     root: Path = Path(".")
+    token: str = ""
     server_version = "MiniAURIONMonitor/1"
 
     def log_message(self, *args):
         pass
+
+    def _own_hosts(self) -> set:
+        port = self.server.server_port
+        return {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+    def _host_ok(self) -> bool:
+        # DNS rebinding keeps the attacker's name in Host: refuse
+        # anything that is not this Monitor's own address (K2).
+        host = (self.headers.get("Host") or "").strip().lower()
+        return host in self._own_hosts()
+
+    def _origin_ok(self) -> bool:
+        # A plain cross-site form POST carries no CORS preflight, but
+        # the browser still names the posting page. Accept only posts
+        # from the Monitor's own pages; headerless posts (curl, a
+        # redirected form) are refused like any stranger (K1).
+        origins = {f"http://{host}" for host in self._own_hosts()}
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin:
+            return origin in origins
+        referer = (self.headers.get("Referer") or "").strip()
+        return any(referer.startswith(home + "/") or referer == home
+                   for home in origins)
+
+    def _token_ok(self, form: dict) -> bool:
+        # Second half of K1: a per-process secret the Monitor's own
+        # forms carry, so a posting page needs the page text too.
+        return bool(self.token) and hmac.compare_digest(
+            form.get("token", ""), self.token)
 
     def _send(self, data: bytes, code: int = 200,
               content_type: str = "text/html; charset=utf-8"):
@@ -480,23 +517,33 @@ class Handler(BaseHTTPRequestHandler):
                 urllib.parse.parse_qs(raw).items() if v}
 
     def do_GET(self):  # noqa: N802 (http.server names the hook)
+        if not self._host_ok():
+            self._send(b"foreign host", code=400, content_type="text/plain")
+            return
         url = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(url.query)
         if url.path == "/":
-            self._send(render_live(self.root))
+            self._send(render_live(self.root, self.token))
         elif url.path == "/receipts":
             task = (query.get("task", [""])[0])
             self._send(render_receipts(self.root, task))
         elif url.path == "/experiments":
             self._send(render_experiments(self.root))
         elif url.path == "/approvals":
-            self._send(render_approvals(self.root))
+            self._send(render_approvals(self.root, self.token))
         else:
             self._send(b"not found", code=404, content_type="text/plain")
 
     def do_POST(self):  # noqa: N802 (http.server names the hook)
+        if not self._host_ok():
+            self._send(b"foreign host", code=400, content_type="text/plain")
+            return
         url = urllib.parse.urlparse(self.path)
         form = self._form()
+        if not self._origin_ok() or not self._token_ok(form):
+            self._send(b"not from the Monitor's own pages", code=403,
+                       content_type="text/plain")
+            return
         try:
             if url.path == "/kill":
                 kill_task(self.root, form.get("task", ""))
@@ -507,6 +554,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/approvals")
             elif url.path == "/caps":
                 ledger_path = form.get("ledger", "")
+                # K3: the ledger path comes from the form, so resolve
+                # it and keep the write inside the watched root.
+                try:
+                    Path(ledger_path).resolve().relative_to(
+                        Path(self.root).resolve())
+                except (OSError, ValueError):
+                    raise KeyError(
+                        "ledger is outside the watched root") from None
                 caps = {}
                 for name in ("task", "daily", "global_"):
                     raw = form.get(name if name != "global_" else "global",
@@ -525,10 +580,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(root: Path, port: int) -> ThreadingHTTPServer:
-    root = Path(root)
     """Loopback only. There is no --host flag: an operator console
     that listens on anything else is a remote kill switch."""
+    root = Path(root)
     Handler.root = root
+    Handler.token = secrets.token_hex(16)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     return server
 

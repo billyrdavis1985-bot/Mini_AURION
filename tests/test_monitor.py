@@ -31,14 +31,24 @@ def _http_get(url):
         return resp.status, resp.read()
 
 
-def _http_post(url, form):
+def _http_post(url, form, headers=None):
     data = urllib.parse.urlencode(form).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers=headers or {})
     try:
         with _opener().open(req, timeout=10) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
+
+
+def _page_token(page: bytes) -> str:
+    # The Monitor's own forms carry the per-process token; the test
+    # reads it back out of the page like the browser would.
+    marker = b'name="token" value="'
+    start = page.index(marker) + len(marker)
+    end = page.index(b'"', start)
+    return page[start:end].decode("ascii")
 
 
 class MonitorTests(unittest.TestCase):
@@ -51,7 +61,7 @@ class MonitorTests(unittest.TestCase):
         self.receipts = os.path.join(self.task_dir, "receipts.jsonl")
         store = ReceiptStore(self.receipts)
         store.append(agent_id="orc", task_id="task-a", action="task_start")
-        self.ledger_path = os.path.join(self.tmp.name, "eval-l.db")
+        self.ledger_path = os.path.join(self.root, "eval-l.db")
         self.ledger = Ledger(self.ledger_path, **CAPS)
         self.proc = {
             "task_id": "task-a", "pid": os.getpid(),
@@ -117,14 +127,40 @@ class MonitorTests(unittest.TestCase):
 
     def test_caps_edit_lands_in_the_ledger(self):
         base = self._serve()
-        code, _ = _http_post(base + "/caps",
-                             {"ledger": self.ledger_path, "task": "500"})
+        _, live = _http_get(base + "/")
+        code, _ = _http_post(
+            base + "/caps",
+            {"ledger": self.ledger_path, "task": "500",
+             "token": _page_token(live)},
+            {"Origin": base})
         self.assertEqual(code, 200)
         check = Ledger.open(self.ledger_path)
         try:
             self.assertEqual(check.caps()["task"], 500)
         finally:
             check.close()
+
+    def test_caps_refuses_a_ledger_outside_the_root(self):
+        import sqlite3
+        outside = os.path.join(self.tmp.name, "someone_elses.sqlite3")
+        db = sqlite3.connect(outside)
+        db.execute("CREATE TABLE notes (x TEXT)")
+        db.commit()
+        db.close()
+        base = self._serve()
+        _, live = _http_get(base + "/")
+        code, _ = _http_post(
+            base + "/caps",
+            {"ledger": outside, "task": "5", "token": _page_token(live)},
+            {"Origin": base})
+        self.assertEqual(code, 400)
+        db = sqlite3.connect(outside)
+        try:
+            tables = sorted(row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"))
+        finally:
+            db.close()
+        self.assertEqual(tables, ["notes"])
 
     def test_approvals_round_trip_through_the_page(self):
         queue = os.path.join(self.task_dir, "approvals.jsonl")
@@ -137,8 +173,11 @@ class MonitorTests(unittest.TestCase):
         _, page_bytes = _http_get(base + "/approvals")
         page = page_bytes.decode()
         self.assertIn("apr_1", page)
-        code, _ = _http_post(base + "/approve",
-                             {"id": "apr_1", "decision": "denied"})
+        code, _ = _http_post(
+            base + "/approve",
+            {"id": "apr_1", "decision": "denied",
+             "token": _page_token(page_bytes)},
+            {"Origin": base})
         self.assertEqual(code, 200)
         self.assertEqual(pending_approvals(self.root), [])
 
