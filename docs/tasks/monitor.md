@@ -20,8 +20,9 @@ one local page.
 
 ## Views
 
-1. **Live:** tasks in flight; current step; elapsed seconds; spend so far
-   against cap; per tier once B1 lands.
+1. **Live:** tasks in flight; the seats (provider and model per seat, from
+   the routing hash in `task_start` and the `model_call` receipts); current step; elapsed seconds; spend so far
+   against cap, per tier (`Ledger.spend()["by_provider"]`).
 2. **Receipts:** per task, the chain in order: model calls, tool calls
    with args, denials with reasons, critic verdicts with the claim text,
    relevance checks, task_end with per-criterion results. Chain

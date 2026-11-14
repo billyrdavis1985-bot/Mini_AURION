@@ -16,6 +16,11 @@ Row and new status, or "none".
 Demo transcript, test names, or batch id. For hardening: the finding id it
 closes.
 
+If this PR talks to an outside service (a model provider, a fetch tool,
+any network endpoint): one live call per direction before merge, with the
+transcript or receipt ids. Fake-API tests prove only the harness side
+(EXPERIMENTS F9).
+
 ## Cost
 
 Dollars and seconds spent on live calls for this PR, or "$0".
