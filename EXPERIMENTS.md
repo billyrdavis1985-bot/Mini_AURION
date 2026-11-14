@@ -117,6 +117,24 @@ kept (OPERATIONS section 7).
   extending it. Configuration, not code, for providers that share a
   wire shape.
 
+## F10. OpenAI-compatible is a family resemblance, not a standard
+
+- **Tried:** OpenAI seat verification (gpt-5-mini-2025-08-07), both
+  directions against Meta (smoke_tiers, runner 97d721b).
+- **Result:** PASS/PASS after three wire fixes: max_completion_tokens
+  (#63), omitted temperature (#64), tool_choice gated on tools (#65).
+  Cost: A $0.0104 (openai $0.0037, 28 s) / B $0.0130 (openai $0.0021,
+  19 s) — the slowest seats yet. Dialects now carried as data:
+  meta/deepseek classic; anthropic no temperature; openai renamed
+  cap + no temperature + gated tool_choice; google everything.
+- **Cost:** about $0.06 live spend including failed rounds.
+- **Lesson (agents, portable):** price of admission per provider is
+  about three live rounds against its strictest model. The
+  per-provider table absorbed all three fixes as rows plus small
+  branches — no adapter rewrites. That is the design working.
+- **Lesson (pipeline):** two debugging rounds across natives burned
+  on stale runners. Check the runner hash before bisecting, always.
+
 ## F9. Vendors remove knobs: qualify every provider live
 
 - **Tried:** native Anthropic (#56) and Google (#57) seats, each
