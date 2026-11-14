@@ -26,7 +26,8 @@ class Specialist:
     def __init__(self, agent_id: str, model, tools, *,
                  max_model_calls: int = 6, max_tool_calls: int = 8,
                  model_estimate_nano: int,
-                 investigator_prompt: str | None = None):
+                 investigator_prompt: str | None = None,
+                 approval_timeout_seconds: float = 600.0):
         """model_estimate_nano is required: 0 asserts the builder knows the
         model is free. Metering is never silently off. Budgets fit
         list-then-read exploration (measured live: 4 tools starve it)."""
@@ -39,6 +40,7 @@ class Specialist:
         self.max_tool_calls = max_tool_calls
         self.model_estimate_nano = model_estimate_nano
         self.investigator_prompt = investigator_prompt
+        self.approval_timeout_seconds = approval_timeout_seconds
 
     def investigate(self, task_id: str, brief: str) -> AgentMessage:
         self.tools.clear_cache()
@@ -122,27 +124,51 @@ class Specialist:
                 args = call.get("args", {})
                 # Model-supplied labels are ignored: the registry declares
                 # the tool's class and cost.
-                try:
-                    out = self.tools.call(name, args)
-                except NeedsApproval as exc:
-                    return self._escalated(
-                        task_id, brief, cost_nano,
-                        f"needs approval: {exc.request['action_class']}"
-                        f" {exc.request['tool']}")
-                except ToolDenied as exc:
-                    if exc.code == "SCOPE_EXCLUDED":
-                        # Scope is a fence, not a cliff: the denial names
-                        # the allowed paths, so the model can comply and
-                        # continue. Policy denials stay fatal below.
-                        messages.append(
-                            {"role": "tool_error",
-                             "text": f"{name} denied: {exc}"[:500]})
+                approved = False
+                while True:
+                    try:
+                        out = self.tools.call(name, args, approved=approved)
+                    except NeedsApproval as exc:
+                        if approved:
+                            return self._escalated(
+                                task_id, brief, cost_nano,
+                                "approved call asked again:"
+                                f" {exc.request['tool']}")
+                        # Pause, don't fail: the operator decides in the
+                        # monitor, and the investigation resumes unpaid —
+                        # waiting consumes time, never budget.
+                        decision = self.tools.await_approval(
+                            exc.request["id"], self.approval_timeout_seconds)
+                        if decision != "approved":
+                            why = ("denied" if decision == "denied"
+                                   else "timed out")
+                            return self._escalated(
+                                task_id, brief, cost_nano,
+                                f"needs approval: {exc.request['action_class']}"
+                                f" {exc.request['tool']} ({why})")
+                        approved = True
                         continue
-                    return self._escalated(
-                        task_id, brief, cost_nano, f"tool denied: {exc}")
-                except ToolFailed as exc:
-                    messages.append({"role": "tool_error",
-                                     "text": f"{name} failed (seq {exc.seq})"})
+                    except ToolDenied as exc:
+                        if exc.code == "SCOPE_EXCLUDED":
+                            # Scope is a fence, not a cliff: the denial
+                            # names the allowed paths, so the model can
+                            # comply and continue. Policy denials stay
+                            # fatal below.
+                            messages.append(
+                                {"role": "tool_error",
+                                 "text": f"{name} denied: {exc}"[:500]})
+                            out = None
+                            break
+                        return self._escalated(
+                            task_id, brief, cost_nano, f"tool denied: {exc}")
+                    except ToolFailed as exc:
+                        messages.append({"role": "tool_error",
+                                         "text": f"{name} failed"
+                                                 f" (seq {exc.seq})"})
+                        out = None
+                        break
+                    break
+                if out is None:
                     continue
                 cost_nano += out["cost_nano"]
                 full = str(out["result"])

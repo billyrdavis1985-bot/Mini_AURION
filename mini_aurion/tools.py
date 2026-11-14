@@ -15,6 +15,8 @@ unlabeled or unknown tool is refused, never defaulted to READ.
 from __future__ import annotations
 
 import json
+import time
+import uuid
 
 from . import policy
 from .contract import TaskContract, resource_in_scope
@@ -100,6 +102,40 @@ class ToolWrapper:
         self.scope = scope
         self._results: dict = {}
 
+    def approvals_path(self):
+        # The operator's queue lives beside the receipts: one file per
+        # task, appended by the agent, decided by the monitor. No
+        # broker, no socket the specialist must stay connected to.
+        return self.receipts.path.parent / "approvals.jsonl"
+
+    def await_approval(self, request_id: str, timeout_seconds: float,
+                       poll_seconds: float = 0.2) -> str | None:
+        # Latest line for the id wins. Returns approved, denied, or
+        # None on timeout; the caller escalates anything unapproved.
+        deadline = time.time() + timeout_seconds
+        while True:
+            try:
+                lines = self.approvals_path().read_text(
+                    encoding="utf-8").split("\n")
+            except OSError:
+                lines = []
+            status = None
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("id") == request_id and "status" in row:
+                    status = row["status"]
+            if status in ("approved", "denied"):
+                return status
+            if time.time() >= deadline:
+                return None
+            time.sleep(poll_seconds)
+
     @staticmethod
     def _key(name: str, args: dict):
         try:
@@ -157,12 +193,17 @@ class ToolWrapper:
             raise ToolDenied("POLICY_DENIED",
                              f"{action_class} {name}: {reason}")
         if verdict == "approve":
-            request = {"agent_id": self.agent_id, "task_id": self.task_id,
+            request = {"id": "apr_" + uuid.uuid4().hex[:12],
+                       "agent_id": self.agent_id, "task_id": self.task_id,
                        "tool": name, "args": dict(args),
-                       "action_class": action_class, "reason": reason}
+                       "action_class": action_class, "reason": reason,
+                       "status": "pending", "ts": time.strftime(
+                           "%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
             self.receipts.append(agent_id=self.agent_id, task_id=self.task_id,
                                  action="approval_requested", tool=name,
                                  detail=request, outcome="ok")
+            with open(self.approvals_path(), "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(request, sort_keys=True) + "\n")
             raise NeedsApproval(request)
         # Exact READ repeats are served from cache: free, receipted, and
         # marked, so a model stuck re-listing a directory pays no budget
