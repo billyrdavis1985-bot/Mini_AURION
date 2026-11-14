@@ -117,6 +117,30 @@ kept (OPERATIONS section 7).
   extending it. Configuration, not code, for providers that share a
   wire shape.
 
+## F11. Local seat: connected, quality model-bound
+
+- **Tried:** local seat (llama3.1:8b, Windows Ollama 0.40.10),
+  both directions against Meta, twice (smoke_tiers, runner b5ca1af).
+- **Result:** run B PASS 2/2 (local judge+synthesis, $0.00 both
+  times). Run A 0/2: attempt 1 investigated 19 s, found reserve,
+  but wrote a sloppy claim the strict grader failed; attempt 2
+  escalated in 2 s. Transport and tools proven $0.00; exactness
+  beyond this 8B model. Side finding: gemma3:12b and mistral-nemo
+  reject EVERY tools call on both endpoints (six probes) — model
+  templates, not payload.
+- **Cost:** about $0.024 (the Meta seats); local $0.00.
+- **Correction:** #67 (omit tool_choice for local) shipped on
+  confounded evidence — gemma rejects everything, so the WITH
+  CHOICE failure never isolated the flag. Harmless either way
+  (omission equals the default), but unproven as necessary. The
+  honest rule stands: one raw tools call against a known-good
+  model before payload bisection.
+- **Lesson (agents, portable):** for local seats, model capability
+  (tools template, exactness) dominates adapter work. Qualify the
+  MODEL first: one raw tools call decides seat-vs-model in a minute.
+- **Lesson (pipeline):** a failing seat needs a known-good-model
+  control before bisection. We spent six probes on broken models.
+
 ## F10. OpenAI-compatible is a family resemblance, not a standard
 
 - **Tried:** OpenAI seat verification (gpt-5-mini-2025-08-07), both
