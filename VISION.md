@@ -44,7 +44,7 @@ capability (OPERATIONS section 2).
 | --- | --- | --- |
 | **B1 Tiers** | Provider interface, router (role to provider+model), per-provider pricing in the ledger. OpenAI-compatible family first (OpenAI, DeepSeek, Meta, local), then native adapters (Anthropic, Google) — all verified live (F9-F11; local connected, answer quality model-bound). | One task where a cheap model investigates and a model from a **different provider** verifies; the ledger shows each tier's cost and the receipts show which model did what. Spec: `docs/tasks/B1-tiers.md`. |
 | **Monitor** | Local, read-only web app over the state directory; kill switch, caps, approvals as the only writes. | Operator watches a live task, reads its receipts, and kills it from the app. Spec: `docs/tasks/monitor.md`. |
-| **B2 Research** | `fetch_url` read tool (memory already tracks fetched URLs), a research task class, ADR-003 on verifying predictive claims (provenance now, calibration over time). | A cited brief on one real question, built from pages actually fetched, with every claim's provenance receipted. The brief also carries one planted unsupported claim; the demo records whether the cross-provider verifier flagged it. Either result is recorded as a finding; it is not a pass/fail gate. |
+| **B2 Research** | `fetch_url` read tool (memory already tracks fetched URLs), a research task class, ADR-003 on verifying predictive claims (provenance now, calibration over time). | A cited brief on one real question, built from pages actually fetched, with every claim's provenance receipted. The brief also carries one planted unsupported claim (a real quote that does not support it); the demo runs it past a same-provider and a cross-provider verifier and records whether each flagged it (ADR-003). Either result is recorded as a finding; it is not a pass/fail gate. |
 | **B3 Collaboration** | Specialists in parallel; verified notes written to shared memory; a synthesizer that builds only on verified notes. | Several agents on one question, visibly building on each other's verified findings; wall-clock shows the parallel gain. |
 | **M7 Autonomy prerequisites** | Saved state and resume, process-level kill, dead-man's switch, receipt store agents cannot write. | Required before any WRITE or EXTERNAL capability. Partly delivered by the monitor. |
 
@@ -86,7 +86,7 @@ result is interesting.
 
 | Question | Owner | Needed by |
 | --- | --- | --- |
-| ADR-003: how predictive and probabilistic claims are verified (provenance now, calibration over time), and what the verifier seat checks beyond relevance | reviewer drafts, operator approves | end of Monitor (blocks B2) |
-| B2's first real research question, in the operator's own domain | operator | end of Monitor (blocks B2) |
+| ADR-003: how predictive and probabilistic claims are verified (provenance now, calibration over time), and what the verifier seat checks beyond relevance | reviewer drafts, operator approves | **drafted** (`docs/adr/003-research-verification.md`); approved by merging it |
+| B2's first real research question, in the operator's own domain | operator | before B2 PR 5 (the demo); PRs 1 to 4 do not need it (`docs/tasks/B2-research.md`) |
 | PRAXIS: a one-paragraph description of its architecture, so findings can be tagged for it | operator | before B3 |
 | A local model strong enough to investigate, or local stays a $0 support seat (F11) | operator | no deadline; DeepSeek is the cheap investigation seat meanwhile |
