@@ -274,6 +274,8 @@ class ReviewFindingsPR11(_LiveHarness):
         self.assertEqual(proc["status"], "ended")
         self.assertTrue(Path(proc["receipts"]).exists())
         self.assertTrue(Path(proc["ledger"]).exists())
+        self.assertIn("specialist", proc["seats"])
+        self.assertIn("provider", proc["seats"]["specialist"])
 
     def test_scope_note_lands_in_the_brief(self):
         state = Path(self.dir) / "state" / "qa-x-r1"

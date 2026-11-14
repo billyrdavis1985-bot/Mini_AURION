@@ -343,8 +343,14 @@ QUOTE_NOTE = ("\n\nCite every file as path:line plus the exact quoted "
               "text (12+ characters copied from that line).")
 
 
+def _seat_of(model) -> dict:
+    slot = getattr(model, "provider", "?"), getattr(model, "model", "?")
+    return {"provider": slot[0], "model": slot[1]}
+
+
 def _write_proc(state_dir: Path, task_id: str, ledger: Ledger,
-                routing_hash, status: str, end_status: str = "") -> None:
+                routing_hash, status: str, end_status: str = "",
+                seats: dict | None = None) -> None:
     # The Monitor's process table entry. Written before the run and
     # re-written after: a "running" entry with a dead pid means the
     # process died without finishing, which the Monitor shows as died.
@@ -355,6 +361,7 @@ def _write_proc(state_dir: Path, task_id: str, ledger: Ledger,
         "receipts": str(state_dir / "receipts.jsonl"),
         "ledger": str(ledger.path),
         "routing": routing_hash,
+        "seats": seats or {},
         "status": status,
         "end_status": end_status,
     }
@@ -438,11 +445,15 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
             routing_hash=routing_hash,
             acceptance=(("A1", grade_check),
                         ("A2", lambda cand: scope_denials(receipts) == 0)))
+        seats = {"specialist": _seat_of(spec_model),
+                 "orchestrator": _seat_of(orc_model)}
+        if verifier_model is not None:
+            seats["verifier"] = _seat_of(verifier_model)
         _write_proc(state_dir, task_id, ledger, routing_hash,
-                    status="running")
+                    status="running", seats=seats)
         result = orc.run(task_id, brief)
         _write_proc(state_dir, task_id, ledger, routing_hash,
-                    status="ended", end_status=result["status"])
+                    status="ended", end_status=result["status"], seats=seats)
         result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
         result["receipts_path"] = str(state_dir / "receipts.jsonl")
         return result
