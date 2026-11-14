@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 
 from mini_aurion.contract import TaskContract
@@ -195,10 +196,73 @@ class SpecialistTests(unittest.TestCase):
                             agent_id="spec")
         spec = Specialist("spec", FakeModel(
             [{"text": "", "tool_calls": [{"tool": "w", "args": {}}]}]), tools,
-            model_estimate_nano=0)
+            model_estimate_nano=0, approval_timeout_seconds=0)
         msg = spec.investigate("t1", "brief")
         self.assertTrue(msg.escalated)
         self.assertIn("needs approval", msg.claim)
+        self.assertIn("timed out", msg.claim)
+
+    def test_approved_call_proceeds_after_the_pause(self):
+        import threading
+        registry = ToolRegistry()
+        registry.register("w", "WRITE", 0, FakeTools({"w": "v"}))
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="gated", task_id="t1",
+                            agent_id="spec")
+        spec = Specialist("spec", FakeModel(
+            [{"text": "", "tool_calls": [{"tool": "w", "args": {}}]},
+             {"text": "done", "evidence": []}]), tools,
+            model_estimate_nano=0, approval_timeout_seconds=10)
+        out = {}
+        worker = threading.Thread(
+            target=lambda: out.setdefault(
+                "msg", spec.investigate("t1", "brief")))
+        worker.start()
+        queue = tools.approvals_path()
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if queue.exists() and queue.read_text().strip():
+                break
+            time.sleep(0.05)
+        rid = json.loads(queue.read_text().strip().split("\n")[0])["id"]
+        with open(queue, "a") as fh:
+            fh.write(json.dumps({"id": rid, "status": "approved"}) + "\n")
+        worker.join(timeout=15)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(out["msg"].escalated)
+        self.assertEqual(out["msg"].claim, "done")
+
+    def test_denied_call_escalates_with_reason(self):
+        registry = ToolRegistry()
+        registry.register("w", "WRITE", 0, FakeTools({"w": "v"}))
+        tools = ToolWrapper(registry, receipts=self.receipts,
+                            ledger=self.ledger, stage="gated", task_id="t1",
+                            agent_id="spec")
+        with open(tools.approvals_path(), "w") as fh:
+            fh.write("")
+        spec = Specialist("spec", FakeModel(
+            [{"text": "", "tool_calls": [{"tool": "w", "args": {}}]}]), tools,
+            model_estimate_nano=0, approval_timeout_seconds=10)
+        import threading
+        out = {}
+        worker = threading.Thread(
+            target=lambda: out.setdefault(
+                "msg", spec.investigate("t1", "brief")))
+        worker.start()
+        queue = tools.approvals_path()
+        deadline = time.time() + 10
+        rid = None
+        while time.time() < deadline and rid is None:
+            text = queue.read_text().strip() if queue.exists() else ""
+            if text:
+                rid = json.loads(text.split("\n")[0])["id"]
+            else:
+                time.sleep(0.05)
+        with open(queue, "a") as fh:
+            fh.write(json.dumps({"id": rid, "status": "denied"}) + "\n")
+        worker.join(timeout=15)
+        self.assertTrue(out["msg"].escalated)
+        self.assertIn("denied", out["msg"].claim)
 
     def test_model_spend_is_reserved_and_settled(self):
         model = FakeModel([{"text": "done",
