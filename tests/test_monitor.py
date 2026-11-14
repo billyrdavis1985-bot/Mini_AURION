@@ -12,8 +12,9 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from mini_aurion.ledger import Ledger, LedgerError  # noqa: E402
-from mini_aurion.monitor import (decide_approval, find_tasks, kill_task,  # noqa: E402
-                                 pending_approvals, serve, task_status)
+from mini_aurion.monitor import (_pid_alive, decide_approval, find_tasks,  # noqa: E402
+                                 kill_task, pending_approvals, serve,
+                                 task_status)
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 
 CAPS = {"task_cap_nano": 10_000_000_000, "daily_cap_nano": 50_000_000_000,
@@ -119,7 +120,11 @@ class MonitorTests(unittest.TestCase):
         code, _ = _http_post(base + "/caps",
                              {"ledger": self.ledger_path, "task": "500"})
         self.assertEqual(code, 200)
-        self.assertEqual(Ledger.open(self.ledger_path).caps()["task"], 500)
+        check = Ledger.open(self.ledger_path)
+        try:
+            self.assertEqual(check.caps()["task"], 500)
+        finally:
+            check.close()
 
     def test_approvals_round_trip_through_the_page(self):
         queue = os.path.join(self.task_dir, "approvals.jsonl")
@@ -153,8 +158,8 @@ class MonitorTests(unittest.TestCase):
             out = kill_task(self.root, "task-a")
             self.assertEqual(out["refund"],
                              {"count": 1, "released_nano": 4_000})
-            self.assertFalse(sleeper.poll() is None
-                             and _alive(sleeper.pid))
+            sleeper.wait(timeout=15)
+            self.assertFalse(_pid_alive(sleeper.pid))
             rows = ReceiptStore(self.receipts).read_all()
             kills = [r for r in rows if r["action"] == "kill"]
             self.assertEqual(len(kills), 1)
@@ -184,12 +189,11 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(task_status(proc), "died")
 
 
-def _alive(pid):
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+    def test_pid_probe_reports_self_alive_and_bogus_dead(self):
+        self.assertTrue(_pid_alive(os.getpid()))
+        self.assertFalse(_pid_alive(2**30 + 7))
+        self.assertFalse(_pid_alive(0))
+        self.assertFalse(_pid_alive("not-a-pid"))
 
 
 if __name__ == "__main__":

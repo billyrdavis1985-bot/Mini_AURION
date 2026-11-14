@@ -34,15 +34,33 @@ def _utcnow() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_alive(pid) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == "nt":
+        # os.kill(pid, 0) is unusable on Windows: signal 0 IS
+        # CTRL_C_EVENT there, so the "are you alive" probe sends
+        # Ctrl+C to the console group. Ask the kernel instead.
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle,
+                                               ctypes.byref(code)):
+                return False
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
+    except PermissionError:
+        return True  # someone else's live process
     except OSError:
-        # Windows raises PermissionError for a live foreign pid; the
-        # monitor only ever kills its own operator's processes, but a
-        # pid we cannot signal is not one we can kill either.
         return False
     return True
 
@@ -180,13 +198,17 @@ def decide_approval(root: Path, request_id: str, decision: str,
 
 
 def kill_task(root: Path, task_id: str) -> dict:
-    root = Path(root)
     """Stop a running task and refund its in-flight reservations.
 
     SIGTERM first, SIGKILL after the grace window, then a kill receipt
     and a ledger refund. Refuses anything not currently running: a
     second kill of the same task must not double-refund.
     """
+    root = Path(root)
+    # Windows has no SIGKILL; its SIGTERM already terminates
+    # unconditionally, so the escalation there is a second SIGTERM.
+    sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+    sigkill_name = "SIGKILL" if hasattr(signal, "SIGKILL") else "SIGTERM"
     target = None
     for proc in find_tasks(root):
         if proc.get("task_id") == task_id:
@@ -206,7 +228,7 @@ def kill_task(root: Path, task_id: str) -> dict:
         time.sleep(0.1)
     used_kill = False
     if _pid_alive(pid):
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, sigkill)
         used_kill = True
         deadline = time.time() + KILL_WAIT_SECONDS
         while time.time() < deadline:
@@ -216,7 +238,7 @@ def kill_task(root: Path, task_id: str) -> dict:
     store = ReceiptStore(target["receipts"])
     store.append(agent_id="monitor", task_id=task_id, action="kill",
                  detail={"pid": pid,
-                         "signal": "SIGKILL" if used_kill else "SIGTERM"},
+                         "signal": sigkill_name if used_kill else "SIGTERM"},
                  outcome="ok")
     ledger = Ledger.open(target["ledger"])
     try:
@@ -232,7 +254,7 @@ def kill_task(root: Path, task_id: str) -> dict:
         {k: v for k, v in target.items() if not k.startswith("_")},
         indent=1), encoding="utf-8")
     return {"task_id": task_id, "pid": pid,
-            "signal": "SIGKILL" if used_kill else "SIGTERM",
+            "signal": sigkill_name if used_kill else "SIGTERM",
             "refund": refund}
 
 
