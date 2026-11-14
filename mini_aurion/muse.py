@@ -165,7 +165,8 @@ PROVIDERS = {
               "price_in_env": None, "price_out_env": None,
               "price_in_default": "0", "price_out_default": "0",
               "tokens_field": "max_tokens",
-              "temperature": 0.0},
+              "temperature": 0.0,
+              "tool_choice": False},
 }
 
 
@@ -296,8 +297,12 @@ class MuseModel:
                 + [_api_message(m) for m in messages],
                 tokens_field: self.config.max_output_tokens}
         # tool_choice rides only with tools: gpt-5-mini 400s on a bare
-        # tool_choice with no tools array (measured live).
-        if tools:
+        # tool_choice with no tools array (measured live). Ollama 400s
+        # on tool_choice even WITH tools, so the local row drops it
+        # (measured live); elsewhere the default auto applies.
+        row_choice = PROVIDERS.get(self.config.provider, {}).get(
+            "tool_choice", True)
+        if tools and row_choice:
             body["tool_choice"] = "auto"
         if row_temp is not None:
             body["temperature"] = row_temp
