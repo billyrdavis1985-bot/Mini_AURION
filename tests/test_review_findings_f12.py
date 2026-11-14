@@ -67,7 +67,6 @@ class OutageIsNotAModelAnswer(unittest.TestCase):
             api_key="k", base_url=self.base, model="m",
             input_usd_per_m="1.0", output_usd_per_m="2.0"))
 
-    @unittest.expectedFailure
     def test_L1_a_200_error_body_raises_not_answers(self):
         """F12 records a full eval that "scored 1/5 under a
         service_overloaded outage". Since H1, provider errors are

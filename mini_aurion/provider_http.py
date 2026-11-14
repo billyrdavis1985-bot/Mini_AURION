@@ -124,16 +124,23 @@ def merged_user_texts(messages: list) -> list[str]:
     return ["\n\n".join(texts)] if texts else [""]
 
 
+def _kept_identifiers(error) -> dict:
+    kept = {}
+    if not isinstance(error, dict):
+        return kept
+    for key in ("type", "code", "param", "status"):
+        value = error.get(key)
+        if isinstance(value, str) and _ERROR_IDENTIFIER.fullmatch(value):
+            kept[key] = value
+    return kept
+
+
 def short_http_error(exc: urllib.error.HTTPError) -> str:
     try:
         raw = exc.read(2048).decode("utf-8", "replace")
         data = json.loads(raw)
         error = data.get("error", {}) if isinstance(data, dict) else {}
-        kept = {}
-        for key in ("type", "code", "param", "status"):
-            value = error.get(key)
-            if isinstance(value, str) and _ERROR_IDENTIFIER.fullmatch(value):
-                kept[key] = value
+        kept = _kept_identifiers(error)
         return f"HTTP {exc.code} {kept or 'no-detail'}"
     except Exception:  # noqa: BLE001 - error parsing never fails the call path
         return f"HTTP {exc.code}"
@@ -169,9 +176,18 @@ def post_json(opener, request, timeout_seconds: float,
     if len(payload) > max_response_bytes:
         raise error("RESPONSE_TOO_LARGE", "response exceeded the cap")
     try:
-        return json.loads(payload.decode("utf-8"))
+        body = json.loads(payload.decode("utf-8"))
     except ValueError as exc:
         raise error("BAD_RESPONSE", "response is not JSON") from exc
+    # L1: a 200 with an error object and no answer is an outage, not
+    # an empty reply. Parsed as text it reads as the model declining
+    # and gets graded a valid miss; raised, it marks the run invalid.
+    if isinstance(body, dict) and "error" in body and not any(
+            key in body for key in ("choices", "content", "candidates")):
+        kept = _kept_identifiers(body.get("error"))
+        raise error("PROVIDER_ERROR",
+                    f"200 {kept or 'no-detail'}")
+    return body
 
 
 def parse_text_reply(text: str) -> dict:
