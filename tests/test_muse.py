@@ -162,6 +162,20 @@ class MuseTests(unittest.TestCase):
         self.assertEqual(sent["body"]["tool_choice"], "auto")
         self.assertEqual(len(sent["body"]["tools"]), 1)
 
+    def test_local_omits_tool_choice_with_tools(self):
+        port = self.server.server_address[1]
+        local = MuseConfig(
+            api_key="local", base_url=f"http://127.0.0.1:{port}/v1",
+            model="m", input_usd_per_m="0", output_usd_per_m="0",
+            provider="local")
+        ScriptedHandler.script.append((200, answer("CANNOT_VERIFY")))
+        MuseModel(local).complete(
+            [{"role": "user", "text": "hi"}],
+            [{"name": "r", "description": "R.", "parameters": {}}])
+        sent = ScriptedHandler.requests[0]
+        self.assertEqual(len(sent["body"]["tools"]), 1)
+        self.assertNotIn("tool_choice", sent["body"])
+
     def test_json_answer_parses(self):
         ScriptedHandler.script.append((200, answer(
             '{"claim": "X holds", "evidence": [{"kind": "file",'
