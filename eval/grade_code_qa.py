@@ -343,6 +343,25 @@ QUOTE_NOTE = ("\n\nCite every file as path:line plus the exact quoted "
               "text (12+ characters copied from that line).")
 
 
+def _write_proc(state_dir: Path, task_id: str, ledger: Ledger,
+                routing_hash, status: str, end_status: str = "") -> None:
+    # The Monitor's process table entry. Written before the run and
+    # re-written after: a "running" entry with a dead pid means the
+    # process died without finishing, which the Monitor shows as died.
+    proc = {
+        "task_id": task_id,
+        "pid": os.getpid(),
+        "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "receipts": str(state_dir / "receipts.jsonl"),
+        "ledger": str(ledger.path),
+        "routing": routing_hash,
+        "status": status,
+        "end_status": end_status,
+    }
+    (state_dir / "proc.json").write_text(json.dumps(proc, indent=1),
+                                         encoding="utf-8")
+
+
 def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
              ledger: Ledger, template, scope_note: str = "",
              exactness_note: str = "", quote_note: str = "",
@@ -419,7 +438,11 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
             routing_hash=routing_hash,
             acceptance=(("A1", grade_check),
                         ("A2", lambda cand: scope_denials(receipts) == 0)))
+        _write_proc(state_dir, task_id, ledger, routing_hash,
+                    status="running")
         result = orc.run(task_id, brief)
+        _write_proc(state_dir, task_id, ledger, routing_hash,
+                    status="ended", end_status=result["status"])
         result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
         result["receipts_path"] = str(state_dir / "receipts.jsonl")
         return result

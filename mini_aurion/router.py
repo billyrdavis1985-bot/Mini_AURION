@@ -121,8 +121,18 @@ class Router:
             raise RoutingError("BAD_SEAT", f"unknown seat {seat!r}")
         return self.models[seat]
 
+    def resolved(self) -> dict:
+        # The assignment that actually ran: provider plus the model
+        # name after table override and environment defaults. The
+        # Monitor's Live view shows this; the hash below commits it.
+        return {seat: {"provider": model.provider, "model": model.model}
+                for seat, model in self.models.items()}
+
     def table_hash(self) -> str:
-        canonical = json.dumps(self.table, sort_keys=True,
+        resolved = dict(self.resolved())
+        resolved["same_provider_ok"] = self.table.get(
+            "same_provider_ok", False)
+        canonical = json.dumps(resolved, sort_keys=True,
                                separators=(",", ":"))
         return "sha256:" + hashlib.sha256(
             canonical.encode("utf-8")).hexdigest()

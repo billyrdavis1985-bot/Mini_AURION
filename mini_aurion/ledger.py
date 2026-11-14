@@ -37,9 +37,6 @@ class Ledger:
                             ("global_cap_nano", global_cap_nano)):
             if not isinstance(value, int) or value <= 0:
                 raise LedgerError("BAD_CAP", f"{name} must be a positive int")
-        self.task_cap = task_cap_nano
-        self.daily_cap = daily_cap_nano
-        self.global_cap = global_cap_nano
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path), timeout=10.0,
@@ -64,7 +61,83 @@ class Ledger:
             "CREATE INDEX IF NOT EXISTS idx_res_task ON reservations(task_id)")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_res_day ON reservations(day)")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS caps"
+            " (name TEXT PRIMARY KEY, value_nano INTEGER NOT NULL)")
+        stored = {
+            row[0]: row[1]
+            for row in self.db.execute("SELECT name, value_nano FROM caps")
+        }
+        if not stored:
+            # First open wins: the creator's caps become the ledger's.
+            # Later opens (the monitor, a rerun) read back, never set.
+            for name, value in (("task", task_cap_nano),
+                                ("daily", daily_cap_nano),
+                                ("global", global_cap_nano)):
+                self.db.execute(
+                    "INSERT INTO caps (name, value_nano) VALUES (?,?)",
+                    (name, value))
+            self.db.commit()
+            stored = {"task": task_cap_nano, "daily": daily_cap_nano,
+                      "global": global_cap_nano}
+        self.task_cap = stored["task"]
+        self.daily_cap = stored["daily"]
+        self.global_cap = stored["global"]
+
+    @classmethod
+    def open(cls, ledger_path) -> Ledger:
+        # Reopen a ledger created elsewhere (the monitor's caps view).
+        # Fresh paths refuse: inventing caps for a stranger's ledger
+        # would split the one-cap invariant across two files.
+        if not Path(ledger_path).exists():
+            raise LedgerError("NO_CAPS",
+                              f"no ledger at {ledger_path}: refusing to"
+                              " invent caps for an unknown ledger")
+        return cls(ledger_path, task_cap_nano=1, daily_cap_nano=1,
+                   global_cap_nano=1)
+
+    def caps(self) -> dict:
+        rows = self.db.execute(
+            "SELECT name, value_nano FROM caps").fetchall()
+        return {name: int(value) for name, value in rows}
+
+    def set_caps(self, *, task=None, daily=None, global_=None) -> dict:
+        # The monitor's caps editor. Updates are atomic and immediate:
+        # reserve() re-reads this table on every call, so a lowered cap
+        # bites the next reservation, not the next process start.
+        updates = {"task": task, "daily": daily, "global": global_}
+        for name, value in updates.items():
+            if value is None:
+                continue
+            if not isinstance(value, int) or value <= 0:
+                raise LedgerError("BAD_CAP",
+                                  f"{name} cap must be a positive int")
+            self.db.execute(
+                "UPDATE caps SET value_nano=? WHERE name=?",
+                (value, name))
         self.db.commit()
+        return self.caps()
+
+    def refund_task(self, task_id: str) -> dict:
+        # Release every in-flight reservation for one task. The kill
+        # path calls this after the process dies so the next task is
+        # not charged for work that never happened.
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            rows = self.db.execute(
+                "SELECT id, estimate_nano FROM reservations"
+                " WHERE task_id=? AND state='reserved'",
+                (task_id,)).fetchall()
+            for res_id, _ in rows:
+                self.db.execute(
+                    "UPDATE reservations SET state='refunded' WHERE id=?",
+                    (res_id,))
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
+        self.db.execute("COMMIT")
+        return {"count": len(rows),
+                "released_nano": sum(int(est) for _, est in rows)}
 
     def close(self) -> None:
         self.db.close()
@@ -106,15 +179,21 @@ class Ledger:
         # reservers serialize here instead of all reading the same total.
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            if self._task_live(task_id) + worst_case_nano > self.task_cap:
+            # Re-read caps inside the reservation transaction: a monitor
+            # edit in another process must bite this call, not the next
+            # process start. Attributes stay as open-time introspection.
+            live = self.caps()
+            task_cap, daily_cap = live["task"], live["daily"]
+            global_cap = live["global"]
+            if self._task_live(task_id) + worst_case_nano > task_cap:
                 raise LedgerError("CAP_EXCEEDED",
-                                  f"task cap {self.task_cap} would break")
-            if self._day_live(day) + worst_case_nano > self.daily_cap:
+                                  f"task cap {task_cap} would break")
+            if self._day_live(day) + worst_case_nano > daily_cap:
                 raise LedgerError("CAP_EXCEEDED",
-                                  f"daily cap {self.daily_cap} would break")
-            if self._global_live() + worst_case_nano > self.global_cap:
+                                  f"daily cap {daily_cap} would break")
+            if self._global_live() + worst_case_nano > global_cap:
                 raise LedgerError("CAP_EXCEEDED",
-                                  f"global cap {self.global_cap} would break")
+                                  f"global cap {global_cap} would break")
             rid = "rsv_" + uuid.uuid4().hex[:16]
             self.db.execute(
                 "INSERT INTO reservations (id, task_id, estimate_nano, state,"
