@@ -254,7 +254,13 @@ class ToolWrapper:
             actual = reported or 0
         if reservation is not None:
             self.ledger.settle(reservation, actual)
-        self.receipts.settle(begun["seq"], return_code, cost_nano=actual)
+        # A backend may name what it read (fetch_url names its
+        # snapshot hash); failures carry no detail, only the code.
+        detail = getattr(backend, "last_receipt_detail", None)
+        if return_code != 0 or not isinstance(detail, dict):
+            detail = None
+        self.receipts.settle(begun["seq"], return_code, cost_nano=actual,
+                             detail=detail)
         if return_code != 0:
             raise ToolFailed(begun["seq"], error)
         if action_class == "READ":
