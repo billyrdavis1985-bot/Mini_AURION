@@ -283,6 +283,11 @@ def render_live(root: Path) -> bytes:
         money = task_spend(proc)
         spend = money.get("spend", {})
         caps = money.get("caps", {})
+        seats = " ".join(
+            f"{seat}={info.get('provider', '?')}/{info.get('model', '?')}"
+            for seat, info in (proc.get("seats") or {}).items())
+        tiers = ", ".join(f"{name} {_nano_usd(nano)}" for name, nano in
+                          sorted(spend.get("by_provider", {}).items()))
         if last:
             seen = (f"{last.get('action','')} {last.get('tool','')}"
                     f" {last.get('outcome','')} (seq {last.get('seq','?')})")
@@ -306,13 +311,22 @@ def render_live(root: Path) -> bytes:
             f"<td>{html.escape(seen)}</td>"
             f"<td>{_nano_usd(spend.get('settled_nano', 0))}</td>"
             f"<td>{_nano_usd(spend.get('inflight_nano', 0))}</td>"
-            f"<td>{_nano_usd(caps.get('task', 0))}</td>"
+            f"<td>{html.escape(tiers or chr(8212))}</td>"
+            f"<td>{html.escape(seats or '?')}</td>"
+            f"<td>{_nano_usd(caps.get('task', 0))}"
+            f'<form method="post" action="/caps">'
+            f'<input type="hidden" name="ledger"'
+            f' value="{html.escape(proc.get("ledger", ""))}">'
+            f'<input type="text" name="task" size="12">'
+            f"<button>set</button></form></td>"
             f"<td>{kill}</td></tr>")
     pend = pending_approvals(root)
     body = (f"<p>{len(tasks)} tasks, {len(pend)} pending approvals.</p>"
             "<table><tr><th>task</th><th>status</th><th>pid</th>"
             "<th>last receipt</th><th>settled</th><th>in-flight</th>"
-            "<th>task cap</th><th></th></tr>" + "".join(rows) + "</table>")
+            "<th>per-tier</th><th>seats</th>"
+            "<th>task cap (nano, set)</th><th></th></tr>"
+            + "".join(rows) + "</table>")
     return _page("Live", body, refresh=5)
 
 

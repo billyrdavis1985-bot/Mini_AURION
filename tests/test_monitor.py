@@ -56,7 +56,10 @@ class MonitorTests(unittest.TestCase):
             "task_id": "task-a", "pid": os.getpid(),
             "started": "2026-01-01T00:00:00Z",
             "receipts": self.receipts, "ledger": self.ledger_path,
-            "routing": "sha256:abc", "status": "running", "end_status": "",
+            "routing": "sha256:abc",
+            "seats": {"specialist": {"provider": "meta",
+                                     "model": "muse-spark-1.1"}},
+            "status": "running", "end_status": "",
         }
         self._write_proc()
         self.server = None
@@ -89,6 +92,8 @@ class MonitorTests(unittest.TestCase):
         self.assertIn("task-a", page)
         self.assertIn("$0.0000", page)  # 3k nano rounds to zero at 4dp
         self.assertIn("running", page)
+        self.assertIn("specialist=meta/muse-spark-1.1", page)
+        self.assertIn("/caps", page)
 
     def test_receipts_view_shows_newest_first(self):
         store = ReceiptStore(self.receipts)
