@@ -111,6 +111,7 @@ def run_mode(args, head: str) -> int:
     state_dir.mkdir(parents=True, exist_ok=True)
     task_id = args.task_id or out_path.stem.replace("_", "-")
     _print_header(args.cap_usd, True, args.routing, router, head)
+    print(f"budgets: {args.max_tools} tools, {args.max_models} models")
     contract = research_contract(args.question, args.cap_usd)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
     ledger = Ledger(state_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
@@ -136,10 +137,11 @@ def run_mode(args, head: str) -> int:
                             agent_id="spec", scope=contract)
         spec = Specialist(
             "spec", spec_model, tools,
+            max_model_calls=args.max_models,
+            max_tool_calls=args.max_tools,
             model_estimate_nano=spec_model.worst_case_nano(
                 [{"role": "brief", "text": args.question}]),
-            investigator_prompt=RESEARCH_INVESTIGATOR_PROMPT,
-            max_model_calls=8, max_tool_calls=12)
+            investigator_prompt=RESEARCH_INVESTIGATOR_PROMPT)
         orc = Orchestrator(
             "orc", orc_model, {"spec": spec},
             Critic("critic", memory, receipts=receipts),
@@ -291,6 +293,8 @@ def main(argv=None) -> int:
     parser.add_argument("--cap-usd", default="5.00")
     parser.add_argument("--routing", required=True)
     parser.add_argument("--task-id", default=None)
+    parser.add_argument("--max-tools", type=int, default=12)
+    parser.add_argument("--max-models", type=int, default=8)
     args = parser.parse_args(argv)
     if not args.live:
         return _refuse("live model calls need --live")
@@ -298,6 +302,10 @@ def main(argv=None) -> int:
         return _refuse("pass --question or --verify, not both or neither")
     if args.verify and not args.planted:
         return _refuse("--verify needs --planted")
+    if args.max_tools is not None and args.max_tools < 1:
+        return _refuse("--max-tools must be a positive int")
+    if args.max_models is not None and args.max_models < 1:
+        return _refuse("--max-models must be a positive int")
     repo = Path(__file__).resolve().parent.parent
     head, dirty = repo_state(repo)
     if head is None or dirty:
