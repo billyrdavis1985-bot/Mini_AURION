@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from mini_aurion.critic import Critic
+from mini_aurion.fetcher import write_snapshot
 from mini_aurion.memory import Memory
 from mini_aurion.messages import AgentMessage
 from mini_aurion.receipts import ReceiptStore
@@ -20,8 +21,13 @@ class CriticTests(unittest.TestCase):
         self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
         self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
                           file_root=self.root,
-                          fetched_urls={"https://example.com/x"})
+                          snapshot_dir=self.tmp.name)
         self.critic = Critic("critic", self.mem, receipts=self.receipts)
+        self.page_url = "https://example.com/x"
+        self.page_snap, _ = write_snapshot(
+            self.tmp.name, url=self.page_url, final_url=self.page_url,
+            status=200, content_type="text/plain",
+            text="Container rates rose 18% in October.")
 
     def tearDown(self):
         self.mem.close()
@@ -33,6 +39,13 @@ class CriticTests(unittest.TestCase):
                                     detail={"args": {"path": path}})
         self.receipts.settle(begun["seq"], 0)
 
+    def seed_fetch(self, url, snapshot, task_id="t1", ok=True):
+        begun = self.receipts.begin(agent_id="spec", task_id=task_id,
+                                    action="tool_call", tool="fetch_url",
+                                    detail={"args": {"url": url}})
+        self.receipts.settle(begun["seq"], 0 if ok else 1,
+                             detail={"snapshot": snapshot})
+
     def msg(self, **kw):
         base = {"sender": "spec", "task_id": "t1", "claim": "X"}
         base.update(kw)
@@ -40,10 +53,13 @@ class CriticTests(unittest.TestCase):
 
     def test_sound_citations_pass(self):
         self.seed_read("a.txt")
+        self.seed_fetch(self.page_url, self.page_snap)
         result = self.critic.check(self.msg(
             evidence=[{"kind": "file", "ref": "a.txt:1",
  "quote": "real file content"},
-                      {"kind": "url", "ref": "https://example.com/x"}]))
+                      {"kind": "url", "ref": self.page_url,
+                       "snapshot": self.page_snap,
+                       "quote": "rates rose 18%"}]))
         self.assertEqual(result["verdict"], "pass")
         self.assertEqual(result["catches"], [])
 
@@ -53,6 +69,39 @@ class CriticTests(unittest.TestCase):
  "quote": "also real content"}]))
         self.assertEqual(result["verdict"], "fail")
         self.assertTrue(any("never read" in c for c in result["catches"]))
+
+    def test_cited_but_unfetched_url_fails(self):
+        result = self.critic.check(self.msg(
+            evidence=[{"kind": "url", "ref": self.page_url,
+                       "snapshot": self.page_snap,
+                       "quote": "rates rose 18%"}]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any("never fetched" in c
+                            for c in result["catches"]))
+
+    def test_fetch_of_another_snapshot_fails(self):
+        other, _ = write_snapshot(
+            self.tmp.name, url=self.page_url, final_url=self.page_url,
+            status=200, content_type="text/plain",
+            text="Container rates rose 18% in October. Updated.")
+        self.seed_fetch(self.page_url, other)
+        result = self.critic.check(self.msg(
+            evidence=[{"kind": "url", "ref": self.page_url,
+                       "snapshot": self.page_snap,
+                       "quote": "rates rose 18%"}]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any("never fetched" in c
+                            for c in result["catches"]))
+
+    def test_failed_fetch_is_not_evidence(self):
+        self.seed_fetch(self.page_url, self.page_snap, ok=False)
+        result = self.critic.check(self.msg(
+            evidence=[{"kind": "url", "ref": self.page_url,
+                       "snapshot": self.page_snap,
+                       "quote": "rates rose 18%"}]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertTrue(any("never fetched" in c
+                            for c in result["catches"]))
 
     def test_spelling_variants_match(self):
         self.seed_read("./a.txt")
