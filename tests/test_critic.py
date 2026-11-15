@@ -134,6 +134,81 @@ class CriticTests(unittest.TestCase):
                                             escalated=True))
         self.assertEqual(result["verdict"], "escalated")
 
+    def url_cite(self, **over):
+        cite = {"kind": "url", "ref": self.page_url,
+                "snapshot": self.page_snap, "quote": "rates rose 18%"}
+        cite.update(over)
+        return cite
+
+    def test_findings_fact_passes_assessment_is_judgment(self):
+        self.seed_fetch(self.page_url, self.page_snap)
+        result = self.critic.check_findings(self.msg(
+            evidence=[],
+            findings=[
+                {"type": "fact", "claim": "Rates rose.",
+                 "evidence": [self.url_cite()]},
+                {"type": "assessment", "claim": "Bad trend.",
+                 "evidence": [self.url_cite()]}]))
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(
+            [one["verdict"] for one in result["findings"]],
+            ["pass", "judgment"])
+
+    def test_findings_untyped_and_uncited_fail(self):
+        self.seed_fetch(self.page_url, self.page_snap)
+        result = self.critic.check_findings(self.msg(
+            evidence=[],
+            findings=[
+                {"claim": "No type.", "evidence": [self.url_cite()]},
+                {"type": "fact", "claim": "No cite.",
+                 "evidence": []}]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("no known type",
+                      " ".join(result["findings"][0]["catches"]))
+        self.assertIn("without citation",
+                      " ".join(result["findings"][1]["catches"]))
+
+    def test_findings_bad_evidence_fails(self):
+        self.seed_fetch(self.page_url, self.page_snap)
+        result = self.critic.check_findings(self.msg(
+            evidence=[],
+            findings=[{"type": "fact", "claim": "Made up.",
+                       "evidence": [self.url_cite(
+                           quote="something else entirely")]}]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("quote not in snapshot",
+                      " ".join(result["catches"]))
+
+    def test_findings_unfetched_url_fails(self):
+        result = self.critic.check_findings(self.msg(
+            evidence=[],
+            findings=[{"type": "fact", "claim": "Rates rose.",
+                       "evidence": [self.url_cite()]}]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("never fetched", " ".join(result["catches"]))
+
+    def test_findings_empty_and_escalated(self):
+        result = self.critic.check_findings(self.msg(evidence=[],
+                                                     findings=[]))
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("no findings filed", result["catches"])
+        escalated = self.msg(evidence=[], findings=[],
+                             escalated=True,
+                             claim="CANNOT_VERIFY: why [brief]")
+        result = self.critic.check_findings(escalated)
+        self.assertEqual(result["verdict"], "escalated")
+
+    def test_findings_forecast_passes_for_registration(self):
+        self.seed_fetch(self.page_url, self.page_snap)
+        result = self.critic.check_findings(self.msg(
+            evidence=[],
+            findings=[{"type": "forecast", "claim": "Rates will rise.",
+                       "probability": 0.7, "resolves_at": "2027-06-01",
+                       "criterion": "index above 100",
+                       "evidence": [self.url_cite()]}]))
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["findings"][0]["verdict"], "pass")
+
     def test_critic_has_no_tools_canary(self):
         self.assertFalse(hasattr(self.critic, "tools"))
         self.assertFalse(hasattr(self.critic, "call"))

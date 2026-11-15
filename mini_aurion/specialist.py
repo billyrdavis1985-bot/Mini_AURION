@@ -105,6 +105,7 @@ class Specialist:
                 return AgentMessage(
                     sender=self.agent_id, task_id=task_id, claim=text,
                     evidence=reply.get("evidence", []),
+                    findings=reply.get("findings", []),
                     confidence=reply.get("confidence", 0.0),
                     cost_nano=cost_nano)
             tools_left = self.max_tool_calls - tool_calls_made
