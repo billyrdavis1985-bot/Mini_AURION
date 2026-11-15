@@ -13,6 +13,8 @@ from mini_aurion.provider_http import parse_text_reply  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 from mini_aurion.research import (RESEARCH_INVESTIGATOR_PROMPT,  # noqa: E402
                                   RESEARCH_INVESTIGATOR_VERSION,
+                                  SUPPORT_PROMPT, SUPPORT_REASON_PROMPT,
+                                  SUPPORT_VERSION, parse_support_verdict,
                                   register_forecasts, validate_finding)
 
 
@@ -119,6 +121,36 @@ class PromptTests(unittest.TestCase):
                       '"type": "forecast"', "probability", "snapshot",
                       "CANNOT_VERIFY"):
             self.assertIn(token, RESEARCH_INVESTIGATOR_PROMPT)
+
+    def test_support_prompts_are_pinned(self):
+        self.assertEqual(SUPPORT_VERSION, "m0.mini-aurion-support.v1")
+        self.assertIn("SUPPORTED: <few words why>", SUPPORT_PROMPT)
+        self.assertIn("UNSUPPORTED: <few words why>", SUPPORT_PROMPT)
+        self.assertIn("its own final line", SUPPORT_REASON_PROMPT)
+        self.assertNotEqual(SUPPORT_PROMPT, SUPPORT_REASON_PROMPT)
+
+
+class ParseSupportTests(unittest.TestCase):
+    def test_last_verdict_wins(self):
+        verdict, reason = parse_support_verdict(
+            "blah SUPPORTED: quotes match")
+        self.assertEqual((verdict, reason), ("supported", "quotes match"))
+        verdict, _ = parse_support_verdict(
+            "SUPPORTED early but UNSUPPORTED: on reflection")
+        self.assertEqual(verdict, "unsupported")
+
+    def test_bare_final_line_takes_reason_from_before(self):
+        verdict, reason = parse_support_verdict(
+            "The quotes leave room.\nUNSUPPORTED")
+        self.assertEqual(verdict, "unsupported")
+        self.assertEqual(reason, "The quotes leave room.")
+
+    def test_unparseable_has_no_verdict(self):
+        verdict, reason = parse_support_verdict("nothing here")
+        self.assertIsNone(verdict)
+        self.assertEqual(reason, "nothing here")
+        verdict, _ = parse_support_verdict("")
+        self.assertIsNone(verdict)
 
 
 class ProtocolTests(unittest.TestCase):
