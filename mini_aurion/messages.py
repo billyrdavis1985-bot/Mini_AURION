@@ -19,6 +19,7 @@ KINDS = ("file", "receipt", "url")
 class AgentMessage:
     def __init__(self, *, sender: str, task_id: str, claim: str,
                  evidence: list[dict] | None = None,
+                 findings: list | None = None,
                  confidence: float = 0.0, cost_nano: int = 0,
                  escalated: bool = False):
         if not sender or not isinstance(sender, str):
@@ -40,10 +41,16 @@ class AgentMessage:
                                    f"kind must be one of {KINDS}")
             if "ref" not in item:
                 raise MessageError("BAD_EVIDENCE", "evidence items need a ref")
+        findings = list(findings or [])
+        for item in findings:
+            if not isinstance(item, dict):
+                raise MessageError("BAD_FINDINGS",
+                                   "finding items must be objects")
         self.sender = sender
         self.task_id = task_id
         self.claim = claim
         self.evidence = evidence
+        self.findings = findings
         self.confidence = float(confidence)
         self.cost_nano = cost_nano
         self.escalated = escalated
@@ -59,5 +66,6 @@ class AgentMessage:
     def to_dict(self) -> dict:
         return {"sender": self.sender, "task_id": self.task_id,
                 "claim": self.claim, "evidence": self.evidence,
+                "findings": self.findings,
                 "confidence": self.confidence, "cost_nano": self.cost_nano,
                 "escalated": self.escalated}

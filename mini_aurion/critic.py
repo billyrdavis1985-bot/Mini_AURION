@@ -15,6 +15,7 @@ from __future__ import annotations
 import posixpath
 
 from .messages import AgentMessage, MessageError
+from .research import validate_finding
 
 
 def _normalize(path: str) -> str:
@@ -47,23 +48,69 @@ class Critic:
                     "by": self.agent_id}
         catches = []
         for item in message.evidence:
-            reason = self.memory.check_source(item, message.task_id)
-            if reason is not None:
-                catches.append(f"{item.get('kind')}:{item.get('ref')}: {reason}")
-                continue
-            if item.get("kind") == "file" and not self._was_read(
-                    message.task_id, str(item.get("ref", ""))):
-                catches.append(f"file:{item.get('ref')}: cited but never read"
-                               " in this task")
-            if item.get("kind") == "url" and not self._was_fetched(
-                    message.task_id, str(item.get("ref", "")),
-                    str(item.get("snapshot", ""))):
-                catches.append(f"url:{item.get('ref')}: cited but never"
-                               " fetched in this task")
+            catches.extend(self._item_catches(message.task_id, item))
         if catches:
             self.catches += len(catches)
             return {"verdict": "fail", "catches": catches, "by": self.agent_id}
         return {"verdict": "pass", "catches": [], "by": self.agent_id}
+
+    def _item_catches(self, task_id: str, item) -> list[str]:
+        """One evidence item, fully checked: resolves, and was read or
+        fetched in this task. Shared by check() and check_findings()."""
+        if not isinstance(item, dict):
+            return ["evidence item is not an object"]
+        reason = self.memory.check_source(item, task_id)
+        if reason is not None:
+            return [f"{item.get('kind')}:{item.get('ref')}: {reason}"]
+        catches = []
+        if item.get("kind") == "file" and not self._was_read(
+                task_id, str(item.get("ref", ""))):
+            catches.append(f"file:{item.get('ref')}: cited but never read"
+                           " in this task")
+        if item.get("kind") == "url" and not self._was_fetched(
+                task_id, str(item.get("ref", "")),
+                str(item.get("snapshot", ""))):
+            catches.append(f"url:{item.get('ref')}: cited but never"
+                           " fetched in this task")
+        return catches
+
+    def check_findings(self, message: AgentMessage) -> dict:
+        """ADR-003 D2: every finding typed, every fact cited. Facts
+        pass or fail on their evidence; assessments whose facts hold
+        come back flagged as judgment, never verified; forecasts come
+        back valid for the caller to register. Pure, like check():
+        registration is the caller's write, not the critic's."""
+        if message.escalated:
+            return {"verdict": "escalated", "catches": [],
+                    "findings": [], "by": self.agent_id}
+        if not message.findings:
+            self.catches += 1
+            return {"verdict": "fail",
+                    "catches": ["no findings filed"],
+                    "findings": [], "by": self.agent_id}
+        checked = []
+        failed = 0
+        for finding in message.findings:
+            reasons = validate_finding(finding)
+            if not reasons:
+                for item in finding.get("evidence", []):
+                    reasons.extend(
+                        self._item_catches(message.task_id, item))
+            ftype = finding.get("type") if isinstance(finding, dict) \
+                else None
+            if reasons:
+                verdict = "fail"
+                failed += 1
+            elif ftype == "assessment":
+                verdict = "judgment"
+            else:
+                verdict = "pass"
+            checked.append({"type": ftype, "verdict": verdict,
+                            "catches": reasons})
+        self.catches += failed
+        return {"verdict": "fail" if failed else "pass",
+                "catches": [c for one in checked for c in one["catches"]],
+                "findings": checked, "by": self.agent_id}
 
     def _was_read(self, task_id: str, ref: str) -> bool:
         path = _normalize(ref.partition(":")[0])

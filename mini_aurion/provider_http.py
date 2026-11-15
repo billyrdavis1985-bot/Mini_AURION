@@ -197,7 +197,7 @@ def parse_text_reply(text: str) -> dict:
     stripped = text.strip()
     if stripped == "CANNOT_VERIFY":
         return {"text": stripped, "tool_calls": [], "evidence": [],
-                "confidence": 0.0, "subtasks": []}
+                "confidence": 0.0, "subtasks": [], "findings": []}
     candidate = stripped
     fenced = _FENCED_JSON.search(stripped)
     if fenced:
@@ -208,7 +208,7 @@ def parse_text_reply(text: str) -> dict:
         parsed = None
     if not isinstance(parsed, dict):
         return {"text": stripped, "tool_calls": [], "evidence": [],
-                "confidence": 0.0, "subtasks": []}
+                "confidence": 0.0, "subtasks": [], "findings": []}
     evidence = parsed.get("evidence", [])
     if not isinstance(evidence, list):
         evidence = []
@@ -219,7 +219,10 @@ def parse_text_reply(text: str) -> dict:
     subtasks = parsed.get("subtasks", [])
     if not isinstance(subtasks, list):
         subtasks = []
+    findings = parsed.get("findings", [])
+    if not isinstance(findings, list):
+        findings = []
     return {"text": str(parsed.get("claim", stripped)),
             "tool_calls": [], "evidence": evidence,
             "confidence": min(max(confidence, 0.0), 1.0),
-            "subtasks": subtasks}
+            "subtasks": subtasks, "findings": findings}
