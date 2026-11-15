@@ -424,5 +424,92 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(starts[0]["detail"]["routing"], "sha256:abc")
 
 
+class SupportTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="ma-support-")
+        self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
+        self.ledger = Ledger(os.path.join(self.tmp.name, "l.sqlite3"), **CAPS)
+        self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
+                          file_root=self.tmp.name)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.mem.close()
+        self.tmp.cleanup()
+
+    def build(self, *texts):
+        verifier = FakeModel([{"text": text} for text in texts])
+        verifier.provider = "prov-verifier"
+        orc = Orchestrator(
+            "orc", FakeModel(), {}, Critic("critic", self.mem,
+                                           receipts=self.receipts),
+            receipts=self.receipts, ledger=self.ledger,
+            model_estimate_nano=0, verifier_model=verifier)
+        return orc, verifier
+
+    def checks(self):
+        return [r for r in self.receipts.read_all()
+                if r["action"] == "support_check"]
+
+    def test_agreement_supported_passes(self):
+        orc, _ = self.build("SUPPORTED: quotes match",
+                            "They match.\nSUPPORTED")
+        out = orc.check_support("t1", "Rates rose.", ["rates rose 18%"])
+        self.assertEqual(out["verdict"], "supported")
+        self.assertEqual(self.checks()[0]["detail"]["verdict"], "supported")
+
+    def test_split_or_double_no_fails_with_no_third_call(self):
+        orc, verifier = self.build("SUPPORTED: quotes match",
+                                   "Room remains.\nUNSUPPORTED")
+        out = orc.check_support("t1", "Rates rose.", ["rates rose 18%"])
+        self.assertEqual(out["verdict"], "unsupported")
+        self.assertEqual(verifier.calls, 2)
+        orc, _ = self.build("UNSUPPORTED: past the evidence",
+                            "Past it.\nUNSUPPORTED")
+        out = orc.check_support("t1", "Rates rose.", ["rates rose 18%"])
+        self.assertEqual(out["verdict"], "unsupported")
+
+    def test_unparseable_fails_closed(self):
+        orc, _ = self.build("SUPPORTED: quotes match", "maybe so")
+        out = orc.check_support("t1", "Rates rose.", ["rates rose 18%"])
+        self.assertEqual(out["verdict"], "unsupported")
+        self.assertIsNone(out["second"])
+
+    def test_model_error_is_distinct_and_fails(self):
+        verifier = FakeModel()
+        verifier.provider = "prov-verifier"
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("overloaded")
+
+        verifier.complete = boom
+        orc = Orchestrator(
+            "orc", FakeModel(), {}, Critic("critic", self.mem,
+                                           receipts=self.receipts),
+            receipts=self.receipts, ledger=self.ledger,
+            model_estimate_nano=0, verifier_model=verifier)
+        out = orc.check_support("t1", "Rates rose.", ["rates rose 18%"])
+        self.assertEqual(out["verdict"], "error")
+        self.assertIn("overloaded", out["reason"])
+
+    def test_no_quotes_is_unsupported_without_a_call(self):
+        orc, verifier = self.build("SUPPORTED: quotes match",
+                                   "They match.\nSUPPORTED")
+        out = orc.check_support("t1", "Rates rose.", [])
+        self.assertEqual(out["verdict"], "unsupported")
+        self.assertEqual(verifier.calls, 0)
+
+    def test_support_runs_on_the_verifier_seat(self):
+        orc, _ = self.build("SUPPORTED: quotes match",
+                            "They match.\nSUPPORTED")
+        orc.check_support("t1", "Rates rose.", ["rates rose 18%"])
+        calls = [r for r in self.receipts.read_all()
+                 if r["action"] == "model_call"
+                 and r["detail"].get("role") == "support"]
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(c["detail"]["provider"] == "prov-verifier"
+                            for c in calls))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,8 @@ import time
 from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
 from .messages import AgentMessage
+from .research import (SUPPORT_PROMPT, SUPPORT_REASON_PROMPT,
+                       parse_support_verdict)
 
 
 class _ModelRefused(Exception):
@@ -389,6 +391,55 @@ class Orchestrator:
                     "reason": reason.strip()[:200]},
             outcome="ok")
         return decision == "irrelevant"
+
+    def check_support(self, task_id: str, claim: str, quotes: list,
+                      subtask: str = "?") -> dict:
+        """ADR-003 D3: do the quotes support the claim? Two verifier
+        calls with different phrasings; the verdict must agree and say
+        supported, or the claim fails. No third call. Unlike the
+        flag-only relevance judge, this gate fails closed: an
+        unparseable reply or a model error marks the claim failed,
+        receipted distinctly as unsupported vs error."""
+        if not quotes:
+            return self._support_receipt(
+                task_id, subtask, "unsupported", None, None,
+                "no quotes to check")
+        try:
+            messages = [{"role": "claim", "text": claim},
+                        {"role": "quotes",
+                         "text": "\n---\n".join(quotes)}]
+            first = self._complete(
+                task_id, messages, system=SUPPORT_PROMPT,
+                role="support", model=self.verifier_model)
+            second = self._complete(
+                task_id, messages, system=SUPPORT_REASON_PROMPT,
+                role="support", model=self.verifier_model)
+        except Exception as exc:
+            return self._support_receipt(
+                task_id, subtask, "error", None, None,
+                f"{type(exc).__name__}: {exc}"[:200])
+        verdict_a, reason_a = parse_support_verdict(
+            first.get("text", ""))
+        verdict_b, _ = parse_support_verdict(second.get("text", ""))
+        if verdict_a == "supported" and verdict_b == "supported":
+            return self._support_receipt(
+                task_id, subtask, "supported", verdict_a, verdict_b,
+                reason_a)
+        return self._support_receipt(
+            task_id, subtask, "unsupported", verdict_a, verdict_b,
+            reason_a or "verdicts disagreed or unparseable")
+
+    def _support_receipt(self, task_id: str, subtask: str, verdict: str,
+                         first, second, reason: str) -> dict:
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id,
+            action="support_check",
+            detail={"subtask": subtask, "verdict": verdict,
+                    "first": first, "second": second,
+                    "reason": (reason or "")[:200]},
+            outcome="ok")
+        return {"verdict": verdict, "reason": (reason or "")[:200],
+                "first": first, "second": second}
 
     def _record_check(self, task_id: str, subtask: str, message,
                       check: dict, attempt: int) -> None:
