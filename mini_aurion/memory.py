@@ -5,8 +5,8 @@ whose cited files changed since).
 
 Every entry names its author, sources, and verification status. Source
 pointers resolve mechanically at write time: a missing file, an unknown
-receipt seq, or an unfetched URL lands the entry as `unverified` with the
-reason recorded. No model judgment is involved.
+receipt seq, or a URL without a snapshot lands the entry as `unverified`
+with the reason recorded. No model judgment is involved.
 
 Owner rule: only a DIFFERENT agent than the author, or a mechanical check,
 can set an entry to `verified`. Self-verification is refused.
@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -40,12 +41,12 @@ class MemoryError(Exception):
 class Memory:
     def __init__(self, path: str | os.PathLike[str], *,
                  file_root: str | os.PathLike[str],
-                 receipt_store=None, fetched_urls: set[str] | None = None,
+                 receipt_store=None, snapshot_dir=None,
                  mechanical_checks: frozenset = frozenset()):
         self.path = Path(path)
         self.root = Path(file_root).resolve()
         self.receipts = receipt_store
-        self.fetched = fetched_urls if fetched_urls is not None else set()
+        self.snapshot_dir = Path(snapshot_dir) if snapshot_dir else None
         for check_id in mechanical_checks:
             if not check_id or not isinstance(check_id, str):
                 raise MemoryError("BAD_FIELD", "check id must be non-empty")
@@ -130,10 +131,54 @@ class Memory:
                         f" {target.get('task_id')!r}")
             return None
         if kind == "url":
-            if ref not in self.fetched:
-                return f"url was not fetched: {ref!r}"
-            return None
+            return self._resolve_url(ref, source)
         return f"unknown source kind: {kind!r}"
+
+    @staticmethod
+    def _squash(text: str) -> str:
+        return " ".join(text.split())
+
+    def _resolve_url(self, ref, source: dict) -> str | None:
+        """ADR-003 D1: a URL citation is a quote inside a stored
+        snapshot. The hash names immutable bytes; the quote must sit
+        in them verbatim after whitespace normalization. Whether this
+        task fetched those bytes is read-to-cite, checked by the
+        critic as for files."""
+        if not isinstance(ref, str) or not ref:
+            return "url ref must be a non-empty string"
+        quote = source.get("quote", "")
+        if not isinstance(quote, str) or len(quote) < 12:
+            return f"url cite needs a 12+ char quote: {ref!r}"
+        if len(quote) > 200:
+            return f"url quote over 200 chars: {ref!r}"
+        snapshot = source.get("snapshot", "")
+        # The hash comes from the model: strict shape first, so it can
+        # never become a path traversal into the snapshot directory.
+        if not isinstance(snapshot, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", snapshot):
+            return f"url cite needs a snapshot hash: {ref!r}"
+        if self.snapshot_dir is None:
+            return "no snapshot directory configured"
+        path = self.snapshot_dir / "snapshots" / f"{snapshot}.json"
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return f"no snapshot {snapshot[:12]}… for {ref!r}"
+        if hashlib.sha256(raw).hexdigest() != snapshot:
+            return f"snapshot {snapshot[:12]}… does not match its hash"
+        try:
+            stored = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            return f"snapshot {snapshot[:12]}… is not JSON"
+        if ref not in (stored.get("url"), stored.get("final_url")):
+            return f"snapshot {snapshot[:12]}… is for another URL"
+        text = stored.get("text", "")
+        if not isinstance(text, str):
+            return f"snapshot {snapshot[:12]}… has no text"
+        if not self._squash(quote) or self._squash(quote) not in \
+                self._squash(text):
+            return f"quote not in snapshot {snapshot[:12]}…"
+        return None
 
     def write(self, author: str, text: str, sources: list[dict], *,
               derived_from: list[str] | None = None,
