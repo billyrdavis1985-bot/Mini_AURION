@@ -1,0 +1,6 @@
+{
+  "specialist": {"provider": "meta", "model": ""},
+  "orchestrator": {"provider": "meta", "model": ""},
+  "verifier": {"provider": "meta", "model": ""},
+  "same_provider_ok": true
+}

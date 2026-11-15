@@ -93,6 +93,24 @@ def parse_support_verdict(text: str):
     return verdict, reason
 
 
+def parse_research_reply(text: str):
+    """Strict envelope parse for the investigator's final reply: a
+    JSON object with a findings list. Shape checks stay with
+    validate_finding (the critic's gate); this only refuses
+    non-JSON and wrong-envelope replies before they get there.
+    Returns (findings, error); exactly one is non-None."""
+    try:
+        raw = json.loads(text or "")
+    except ValueError:
+        return None, "reply is not JSON"
+    if not isinstance(raw, dict):
+        return None, "reply is not a JSON object"
+    findings = raw.get("findings")
+    if not isinstance(findings, list) or not findings:
+        return None, "reply carries no findings list"
+    return findings, None
+
+
 def validate_finding(finding) -> list[str]:
     """Shape and field checks for one finding. Evidence *content*
     (quotes, snapshots, read-to-cite) is the critic's job; this gate
