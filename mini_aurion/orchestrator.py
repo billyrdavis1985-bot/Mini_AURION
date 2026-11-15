@@ -15,7 +15,8 @@ from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
 from .messages import AgentMessage
 from .research import (SUPPORT_PROMPT, SUPPORT_REASON_PROMPT,
-                       parse_support_verdict)
+                       parse_research_reply, parse_support_verdict,
+                       register_forecasts)
 
 
 class _ModelRefused(Exception):
@@ -440,6 +441,174 @@ class Orchestrator:
             outcome="ok")
         return {"verdict": verdict, "reason": (reason or "")[:200],
                 "first": first, "second": second}
+
+    def run_research(self, task_id: str, question: str, *,
+                     contract, predictions_path, models: list) -> dict:
+        """One research question, one investigator pass: investigate
+        with fetch_url, parse the findings envelope (one retry on a
+        malformed reply, as in _delegate), critic-check every finding
+        (D1/D2), support-check each one that passed (D3), register
+        the forecasts (D4). No planner: decomposition for research
+        is future work, and one pass is what the B2 demo measures."""
+        self.messages_used = 0
+        self._run_started = time.perf_counter()
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id,
+            action="task_start",
+            detail={"question": question[:500],
+                    "contract": contract_hash(contract),
+                    **({"routing": self.routing_hash}
+                       if self.routing_hash is not None else {})},
+            outcome="ok")
+        try:
+            return self._research_inner(
+                task_id, question, contract, predictions_path, models)
+        except Exception as exc:  # noqa: BLE001 - every task ends with task_end
+            return self._research_end(
+                task_id, "escalated", [], 0,
+                f"{type(exc).__name__}: {exc}"[:300])
+
+    def _research_inner(self, task_id: str, question: str, contract,
+                        predictions_path, models: list) -> dict:
+        specialist = self.specialists.get(
+            "spec", next(iter(self.specialists.values()), None))
+        if specialist is None:
+            return self._research_end(
+                task_id, "escalated", [], 0, "unknown specialist")
+        message = self._investigate(task_id, specialist, question)
+        if message.escalated:
+            return self._research_end(
+                task_id, "escalated", [], 0,
+                f"investigator escalated: {message.claim}"[:300])
+        findings, error = parse_research_reply(message.claim)
+        if error is not None:
+            retry = self._investigate(
+                task_id, specialist,
+                f"{question} [previous answer failed: {error}]")
+            if retry.escalated:
+                return self._research_end(
+                    task_id, "escalated", [], 0,
+                    f"investigator escalated: {retry.claim}"[:300])
+            findings, error = parse_research_reply(retry.claim)
+            if error is not None:
+                return self._research_end(
+                    task_id, "escalated", [], 0,
+                    f"findings unparseable: {error}")
+            message = retry
+        checked = self.critic.check_findings(AgentMessage(
+            sender=specialist.agent_id, task_id=task_id,
+            claim=message.claim, findings=findings))
+        brief = self._verify_and_register(
+            task_id, findings, checked, predictions_path, models)
+        standing = [f for f in brief
+                    if f["critic"] in ("pass", "judgment")
+                    and f["support"] == "supported"]
+        if len(standing) == len(brief) and brief:
+            status = "complete"
+        elif standing:
+            status = "partial"
+        else:
+            status = "escalated"
+        return self._research_end(
+            task_id, status, brief,
+            len([r for r in self.receipts.read_all()
+                 if r["task_id"] == task_id
+                 and r["action"] == "forecast_registered"]),
+            "")
+
+    def _verify_and_register(self, task_id: str, findings: list,
+                             checked: dict, predictions_path,
+                             models: list) -> list:
+        """Support-check every critic-passed finding and register the
+        forecasts. Forecasts register once the critic passes them,
+        even support-flagged: the register records what was claimed,
+        and the brief carries the flag beside it."""
+        brief = []
+        for finding, verdict in zip(findings, checked["findings"]):
+            entry = {"type": finding.get("type") if isinstance(
+                finding, dict) else None,
+                     "claim": finding.get("claim", "") if isinstance(
+                         finding, dict) else "",
+                     "evidence": finding.get("evidence", []) if isinstance(
+                         finding, dict) else [],
+                     "critic": verdict["verdict"],
+                     "catches": verdict["catches"],
+                     "support": None, "support_reason": "",
+                     "registered": False}
+            if verdict["verdict"] in ("pass", "judgment"):
+                quotes = [item.get("quote", "")
+                          for item in entry["evidence"]
+                          if isinstance(item, dict)
+                          and item.get("quote")]
+                out = self.check_support(
+                    task_id, entry["claim"], quotes,
+                    subtask=f"finding-{len(brief) + 1}")
+                entry["support"] = out["verdict"]
+                entry["support_reason"] = out["reason"]
+            brief.append(entry)
+        registerable = [
+            finding for finding, verdict in zip(findings, checked["findings"])
+            if isinstance(finding, dict)
+            and finding.get("type") == "forecast"
+            and verdict["verdict"] == "pass"]
+        if registerable:
+            register_forecasts(task_id, registerable,
+                               predictions_path=predictions_path,
+                               receipts=self.receipts, models=models)
+            wanted = {id(f) for f in registerable}
+            for entry, finding in zip(brief, findings):
+                if id(finding) in wanted:
+                    entry["registered"] = True
+        return brief
+
+    def verify_findings(self, task_id: str, findings: list,
+                        *, brief_task_id: str = "") -> dict:
+        """Re-run support verification over findings from an earlier
+        task (the planted-claim experiment): the D1 gate re-checks
+        each finding against the brief's task id, where its reads
+        live, and check_support runs on this task's verifier seat.
+        Findings that fail D1 are refused, never counted."""
+        checked = self.critic.check_findings(AgentMessage(
+            sender=self.agent_id, task_id=brief_task_id or task_id,
+            claim="(replay)", findings=findings))
+        out = []
+        for finding, verdict in zip(findings, checked["findings"]):
+            claim = finding.get("claim", "") if isinstance(
+                finding, dict) else ""
+            entry = {"claim": claim, "d1": verdict["verdict"],
+                     "catches": verdict["catches"],
+                     "support": None, "support_reason": ""}
+            if verdict["verdict"] in ("pass", "judgment"):
+                quotes = [item.get("quote", "")
+                          for item in (finding.get("evidence", [])
+                                       if isinstance(finding, dict) else [])
+                          if isinstance(item, dict) and item.get("quote")]
+                result = self.check_support(
+                    task_id, claim, quotes,
+                    subtask=f"replay-{len(out) + 1}")
+                entry["support"] = result["verdict"]
+                entry["support_reason"] = result["reason"]
+            out.append(entry)
+        return {"task_id": task_id, "findings": out}
+
+    def _research_end(self, task_id: str, status: str, brief: list,
+                      registered: int, error: str) -> dict:
+        try:
+            cost_nano = self.ledger.spend(task_id)["settled_nano"]
+        except Exception:  # noqa: BLE001 - reporting never breaks the guard
+            cost_nano = 0
+        detail = {"status": status, "findings": len(brief),
+                  "registered": registered,
+                  "duration_ms": self._run_ms()}
+        if error:
+            detail["error"] = error[:300]
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="task_end",
+            detail=detail,
+            outcome="ok" if status == "complete" else status)
+        return {"task_id": task_id, "status": status, "findings": brief,
+                "registered": registered, "cost_nano": cost_nano,
+                "error": error}
 
     def _record_check(self, task_id: str, subtask: str, message,
                       check: dict, attempt: int) -> None:
