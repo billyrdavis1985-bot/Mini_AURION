@@ -131,6 +131,11 @@ class ResearchRunTests(unittest.TestCase):
         self.assertEqual(out["registered"], 1)
         self.assertEqual([f["support"] for f in out["findings"]],
                          ["supported", "supported"])
+        # The brief keeps the register fields: a replay from the
+        # brief must pass the same D2 gate the brief passed.
+        self.assertEqual(out["findings"][1]["probability"], 0.4)
+        self.assertEqual(out["findings"][1]["resolves_at"], "2027-01-01")
+        self.assertTrue(out["findings"][1]["criterion"])
         rows = open(self.predictions(), encoding="utf-8").read().strip()
         row = json.loads(rows.split("\n")[0])
         self.assertEqual(row["probability"], 0.4)
