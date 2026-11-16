@@ -203,6 +203,15 @@ def run_mode(args, head: str) -> int:
         ledger.close()
 
 
+def _replay_finding(finding: dict) -> dict:
+    out = {"type": finding.get("type"), "claim": finding.get("claim", ""),
+           "evidence": finding.get("evidence", [])}
+    for key in ("probability", "resolves_at", "criterion"):
+        if key in finding:
+            out[key] = finding[key]
+    return out
+
+
 def verify_mode(args, head: str) -> int:
     eval_started = time.perf_counter()
     router = _load_routing(args.routing)
@@ -239,9 +248,9 @@ def verify_mode(args, head: str) -> int:
             detail={"question": f"re-verify {brief.get('task_id', '?')}"
                     f" + planted claim [{tag}]",
                     "routing": router.table_hash()}, outcome="ok")
-        findings = [{"type": f.get("type"), "claim": f.get("claim", ""),
-                     "evidence": f.get("evidence", [])}
-                    for f in brief.get("findings", [])]
+        # Forecasts replay with their register fields: without them
+        # the D2 shape gate fails a finding the brief passed.
+        findings = [_replay_finding(f) for f in brief.get("findings", [])]
         findings.append(planted)
         result = orc.verify_findings(
             task_id, findings, brief_task_id=brief.get("task_id", ""))
