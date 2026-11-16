@@ -43,13 +43,18 @@ class FetchError(Exception):
 def address_is_public(ip_text: str) -> bool:
     """True only for globally routable unicast addresses. Everything
     else — loopback, private, link-local, multicast, reserved,
-    unspecified — is refused before connecting (D5)."""
+    unspecified — is refused before connecting (D5). The is_global
+    conjunct catches shared address space (100.64.0.0/10), which
+    ipaddress calls neither private nor global; mesh VPNs hand the
+    operator's own machines addresses there. is_global alone would
+    admit 64:ff9b::/96, which the list below still refuses."""
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
         return False
-    return not (ip.is_loopback or ip.is_private or ip.is_link_local
-                or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+    return ip.is_global and not (
+        ip.is_loopback or ip.is_private or ip.is_link_local
+        or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
 
 
 def parse_url(url: str) -> tuple:

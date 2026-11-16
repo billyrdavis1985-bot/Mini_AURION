@@ -4,3 +4,7 @@ var/
 .venv/
 eval/code-qa-v1/
 eval/results-*.json
+eval/brief-*
+eval/verify-*
+eval/planted-q*
+eval/livefetch/

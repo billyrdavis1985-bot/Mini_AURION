@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from decimal import Decimal
@@ -25,7 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval.grade_code_qa import NANO_PER_USD, repo_state  # noqa: E402
+from eval.grade_code_qa import (INVALID_CAUSES, NANO_PER_USD,  # noqa: E402
+                                repo_state)
 from mini_aurion.contract import (Criterion, TaskContract,  # noqa: E402
                                   contract_hash)
 from mini_aurion.critic import Critic  # noqa: E402
@@ -43,11 +45,14 @@ from mini_aurion.tools import ToolRegistry, ToolWrapper  # noqa: E402
 CONTRACT_ID = "research.v1"
 
 
-def research_contract(question: str, cap_usd: str) -> TaskContract:
+def research_contract(question: str, cap_usd: str, max_tools: int = 12,
+                      max_models: int = 8) -> TaskContract:
     """Scope is the web minus the D5 refusals, which live in
     fetch_url itself: the scope gate only sees path args, and
     fetch_url takes a url, so the contract carries budget and
-    acceptance while the fetcher enforces the boundary."""
+    acceptance while the fetcher enforces the boundary. The tool
+    and model budgets live here (not beside the contract) so the
+    receipted contract hash reflects what the run allowed."""
     return TaskContract(
         contract_id=CONTRACT_ID, version=1, goal=question[:500],
         deliverable="cited brief: typed findings with URL, snapshot"
@@ -58,7 +63,25 @@ def research_contract(question: str, cap_usd: str) -> TaskContract:
                               "every fact carries a D1 citation"),
                     Criterion("A2", "mechanical",
                               "every passed forecast is registered")),
-        spend_usd=cap_usd, messages=20, decompose=False)
+        spend_usd=cap_usd, messages=20, decompose=False,
+        max_tools=max_tools, max_models=max_models)
+
+
+def _a1_facts_cited(candidate: dict) -> bool:
+    return all(f.get("critic") == "pass"
+               for f in candidate["findings"]
+               if f.get("type") == "fact")
+
+
+def _a2_forecasts_registered(candidate: dict) -> bool:
+    return all(f.get("registered", False)
+               for f in candidate["findings"]
+               if f.get("type") == "forecast"
+               and f.get("critic") == "pass")
+
+
+RESEARCH_ACCEPTANCE = (("A1", _a1_facts_cited),
+                       ("A2", _a2_forecasts_registered))
 
 
 def _fresh_dir(path: Path) -> Path:
@@ -75,6 +98,27 @@ def _fresh_dir(path: Path) -> Path:
 def _refuse(message: str) -> int:
     print(f"refusing to run: {message}")
     return 2
+
+
+def _write_proc(state_dir: Path, task_id: str, ledger, routing_hash,
+                status: str, end_status: str = "",
+                seats: dict | None = None) -> None:
+    """The Monitor's process table entry, mirroring the code-QA
+    runner: written before the run and re-written after, so the
+    demo run is visible in the Live view while it works."""
+    proc = {
+        "task_id": task_id,
+        "pid": os.getpid(),
+        "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "receipts": str(state_dir / "receipts.jsonl"),
+        "ledger": str(ledger.path),
+        "routing": routing_hash,
+        "seats": seats or {},
+        "status": status,
+        "end_status": end_status,
+    }
+    (state_dir / "proc.json").write_text(json.dumps(proc, indent=1),
+                                         encoding="utf-8")
 
 
 def _load_routing(path: str) -> Router:
@@ -112,7 +156,9 @@ def run_mode(args, head: str) -> int:
     task_id = args.task_id or out_path.stem.replace("_", "-")
     _print_header(args.cap_usd, True, args.routing, router, head)
     print(f"budgets: {args.max_tools} tools, {args.max_models} models")
-    contract = research_contract(args.question, args.cap_usd)
+    contract = research_contract(args.question, args.cap_usd,
+                                 max_tools=args.max_tools,
+                                 max_models=args.max_models)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
     ledger = Ledger(state_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
                     daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
@@ -137,8 +183,8 @@ def run_mode(args, head: str) -> int:
                             agent_id="spec", scope=contract)
         spec = Specialist(
             "spec", spec_model, tools,
-            max_model_calls=args.max_models,
-            max_tool_calls=args.max_tools,
+            max_model_calls=contract.max_models,
+            max_tool_calls=contract.max_tools,
             model_estimate_nano=spec_model.worst_case_nano(
                 [{"role": "brief", "text": args.question}]),
             investigator_prompt=RESEARCH_INVESTIGATOR_PROMPT)
@@ -150,17 +196,29 @@ def run_mode(args, head: str) -> int:
                 [{"role": "claim", "text": args.question}]),
             contract=contract, message_budget=contract.messages,
             verifier_model=verifier_model,
-            routing_hash=router.table_hash())
+            routing_hash=router.table_hash(),
+            acceptance=RESEARCH_ACCEPTANCE)
         seats = router.resolved()
         verifier_seat = seats.get("verifier", seats["orchestrator"])
         models = [f"{seats['specialist']['provider']}"
                   f"/{seats['specialist']['model']}",
                   f"{verifier_seat['provider']}"
                   f"/{verifier_seat['model']}"]
+        _write_proc(state_dir, task_id, ledger, router.table_hash(),
+                    status="running", seats=seats)
         result = orc.run_research(
             task_id, args.question, contract=contract,
             predictions_path=state_dir / "predictions.jsonl",
             models=models)
+        # M3: an errored run is invalid, in the code-QA grader's
+        # words. The receipts keep the underlying status; the brief
+        # and the console say invalid so no transcript can cite it.
+        cause = result.get("cause", "model")
+        reasons = [f"invalid run: {cause}"] \
+            if cause in INVALID_CAUSES else []
+        status = "invalid" if reasons else result["status"]
+        _write_proc(state_dir, task_id, ledger, router.table_hash(),
+                    status="ended", end_status=status, seats=seats)
         by_provider = ledger.spend(task_id)["by_provider"]
         wall_ms = next((
             r["detail"].get("duration_ms", 0)
@@ -168,7 +226,8 @@ def run_mode(args, head: str) -> int:
             if r["action"] == "task_end"), 0)
         brief = {
             "question": args.question, "task_id": task_id,
-            "status": result["status"], "error": result["error"],
+            "status": status, "error": result["error"],
+            "cause": cause,
             "contract": contract_hash(contract),
             "routing": router.table_hash(), "seats": seats,
             "runner_commit": head, "cap_usd": args.cap_usd,
@@ -187,10 +246,12 @@ def run_mode(args, head: str) -> int:
                   f" support={finding['support']}")
         flagged = [f for f in result["findings"]
                    if f["support"] != "supported"]
-        print(f"status={result['status']}"
+        print(f"status={status}"
               f" findings={len(result['findings'])}"
               f" registered={result['registered']}"
               f" flagged={len(flagged)}")
+        for reason in reasons:
+            print(f"INVALID {reason}")
         print(f"wrote {out_path}")
         print(f"eval spend: {result['cost_nano']} nanoUSD"
               f" ({result['cost_nano'] / NANO_PER_USD:.8f} USD)")
