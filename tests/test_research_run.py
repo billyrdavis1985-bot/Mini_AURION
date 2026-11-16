@@ -260,6 +260,19 @@ class VerifyFindingsTests(unittest.TestCase):
         self.assertEqual(out["findings"][0]["d1"], "pass")
         self.assertEqual(out["findings"][0]["support"], "supported")
 
+    def test_forecast_replay_keeps_its_register_fields(self):
+        from eval.run_research import _replay_finding
+        brief_entry = {"type": "forecast", "claim": "c",
+                       "probability": 0.4, "resolves_at": "2027-01-01",
+                       "criterion": "k", "evidence": [],
+                       "critic": "pass", "support": "unsupported",
+                       "support_reason": "r", "registered": True}
+        replayed = _replay_finding(brief_entry)
+        self.assertEqual(replayed["probability"], 0.4)
+        self.assertEqual(replayed["resolves_at"], "2027-01-01")
+        self.assertEqual(replayed["criterion"], "k")
+        self.assertNotIn("support", replayed)
+
     def test_bogus_snapshot_is_refused_without_a_call(self):
         bad = fact("0" * 64)
         out = self.orc.verify_findings(
