@@ -525,16 +525,17 @@ class Orchestrator:
         and the brief carries the flag beside it."""
         brief = []
         for finding, verdict in zip(findings, checked["findings"]):
-            entry = {"type": finding.get("type") if isinstance(
-                finding, dict) else None,
-                     "claim": finding.get("claim", "") if isinstance(
-                         finding, dict) else "",
-                     "evidence": finding.get("evidence", []) if isinstance(
-                         finding, dict) else [],
-                     "critic": verdict["verdict"],
-                     "catches": verdict["catches"],
-                     "support": None, "support_reason": "",
-                     "registered": False}
+            # Copy, then annotate: cherry-picking keys silently drops
+            # fields a replay needs (measured: probability never made
+            # the brief, so every forecast replay failed D2).
+            entry = dict(finding) if isinstance(finding, dict) else {}
+            entry.setdefault("type", None)
+            entry.setdefault("claim", "")
+            entry.setdefault("evidence", [])
+            entry.update({"critic": verdict["verdict"],
+                          "catches": verdict["catches"],
+                          "support": None, "support_reason": "",
+                          "registered": False})
             if verdict["verdict"] in ("pass", "judgment"):
                 quotes = [item.get("quote", "")
                           for item in entry["evidence"]
