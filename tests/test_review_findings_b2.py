@@ -34,7 +34,6 @@ CAP = 10 ** 9
 
 class FetchAddressGate(unittest.TestCase):
 
-    @unittest.expectedFailure
     def test_M1_shared_address_space_is_not_public(self):
         """address_is_public refuses loopback, private, link-local,
         multicast, reserved and unspecified. It allows 100.64.0.0/10
@@ -67,7 +66,6 @@ class RedirectedCitations(unittest.TestCase):
                              snapshot_dir=self.base)
         self.addCleanup(self.memory.close)
 
-    @unittest.expectedFailure
     def test_M2_citing_the_final_url_of_a_redirect_counts_as_fetched(self):
         """fetch_url follows redirects (http to https is the common
         case) and returns final_url in its result; the snapshot records
@@ -172,7 +170,6 @@ class ResearchRunOutcomes(unittest.TestCase):
                                 predictions_path=self.base / "p.jsonl",
                                 models=["m"])
 
-    @unittest.expectedFailure
     def test_M3_a_verifier_outage_is_an_invalid_run_not_a_flag(self):
         """check_support turns a verifier error into verdict 'error',
         which run_research then treats like 'unsupported': the fact is
@@ -191,7 +188,6 @@ class ResearchRunOutcomes(unittest.TestCase):
                          f"outage reported as status={result['status']!r}"
                          f" error={result['error']!r}")
 
-    @unittest.expectedFailure
     def test_M4_research_status_comes_from_the_contract_acceptance(self):
         """The research contract declares A1 and A2 as mechanical
         acceptance criteria (OPERATIONS section 12: done means

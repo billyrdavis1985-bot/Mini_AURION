@@ -134,8 +134,10 @@ class Critic:
     def _was_fetched(self, task_id: str, ref: str, snapshot: str) -> bool:
         # The cited bytes must be bytes this task fetched: the settle
         # receipt of the matching fetch_url call carries the snapshot
-        # hash it stored (wired in B2 PR1).
-        begun: set[int] = set()
+        # hash it stored (wired in B2 PR1). The cited ref may be the
+        # requested URL or the final URL after redirects: the tool
+        # reports final_url, so citing it is correct, not a stretch.
+        begun: dict[int, str] = {}
         records = self.receipts.read_all()
         for record in records:
             if record.get("task_id") != task_id:
@@ -144,12 +146,19 @@ class Critic:
                     and record.get("tool") in self.fetch_tools:
                 args = (record.get("detail") or {}).get("args", {})
                 if str(args.get("url", "")) == ref:
-                    begun.add(record.get("seq", -1))
+                    begun[record.get("seq", -1)] = "requested"
+                else:
+                    begun.setdefault(record.get("seq", -1), "other")
         for record in records:
-            if record.get("action") == "settle" \
-                    and record.get("outcome") == "ok" \
-                    and record.get("settles") in begun \
-                    and (record.get("detail") or {}).get("snapshot") \
-                    == snapshot:
+            if record.get("action") != "settle" \
+                    or record.get("outcome") != "ok" \
+                    or record.get("settles") not in begun:
+                continue
+            detail = record.get("detail") or {}
+            if detail.get("snapshot") != snapshot:
+                continue
+            if begun[record["settles"]] == "requested":
+                return True
+            if detail.get("final_url") == ref:
                 return True
         return False

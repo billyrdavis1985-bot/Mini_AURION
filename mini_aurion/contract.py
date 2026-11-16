@@ -33,6 +33,8 @@ class TaskContract:
     spend_usd: str = "3.00"
     messages: int = 10
     decompose: bool = False
+    max_tools: int = 8
+    max_models: int = 6
 
     def criterion_ids(self) -> frozenset:
         return frozenset(c.id for c in self.acceptance)
@@ -68,6 +70,7 @@ def contract_hash(contract: TaskContract) -> str:
                        for c in contract.acceptance],
         "spend_usd": contract.spend_usd, "messages": contract.messages,
         "decompose": contract.decompose,
+        "max_tools": contract.max_tools, "max_models": contract.max_models,
     }, sort_keys=True)
     return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
 

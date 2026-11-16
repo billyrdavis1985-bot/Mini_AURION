@@ -466,7 +466,7 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001 - every task ends with task_end
             return self._research_end(
                 task_id, "escalated", [], 0,
-                f"{type(exc).__name__}: {exc}"[:300])
+                f"{type(exc).__name__}: {exc}"[:300], cause="error")
 
     def _research_inner(self, task_id: str, question: str, contract,
                         predictions_path, models: list) -> dict:
@@ -500,6 +500,19 @@ class Orchestrator:
             claim=message.claim, findings=findings))
         brief = self._verify_and_register(
             task_id, findings, checked, predictions_path, models)
+        registered = len([r for r in self.receipts.read_all()
+                          if r["task_id"] == task_id
+                          and r["action"] == "forecast_registered"])
+        # M3: a verifier outage is an invalid run, not a result. An
+        # 'error' verdict must never read as a flag: without this,
+        # a downed verifier seat would "catch" every claim.
+        errors = [f for f in brief if f["support"] == "error"]
+        if errors:
+            return self._research_end(
+                task_id, "escalated", brief, registered,
+                f"verifier outage: {len(errors)} support checks"
+                " errored; brief is invalid",
+                cause="error")
         standing = [f for f in brief
                     if f["critic"] in ("pass", "judgment")
                     and f["support"] == "supported"]
@@ -510,11 +523,7 @@ class Orchestrator:
         else:
             status = "escalated"
         return self._research_end(
-            task_id, status, brief,
-            len([r for r in self.receipts.read_all()
-                 if r["task_id"] == task_id
-                 and r["action"] == "forecast_registered"]),
-            "")
+            task_id, status, brief, registered, "")
 
     def _verify_and_register(self, task_id: str, findings: list,
                              checked: dict, predictions_path,
@@ -593,23 +602,40 @@ class Orchestrator:
         return {"task_id": task_id, "findings": out}
 
     def _research_end(self, task_id: str, status: str, brief: list,
-                      registered: int, error: str) -> dict:
+                      registered: int, error: str,
+                      cause: str = "model") -> dict:
         try:
             cost_nano = self.ledger.spend(task_id)["settled_nano"]
         except Exception:  # noqa: BLE001 - reporting never breaks the guard
             cost_nano = 0
+        # M4: done means accepted, as in _finish. The candidate carries
+        # the brief entries, which is what the research checkers read.
+        candidate = {"status": status, "text": "", "evidence": [],
+                     "findings": brief, "unattempted": []}
+        results = {}
+        for cid, checker in self.acceptance:
+            try:
+                results[cid] = bool(checker(candidate))
+            except Exception:
+                results[cid] = False
+        failed = [cid for cid, ok in results.items() if not ok]
+        if status == "complete" and failed:
+            status = "partial"
         detail = {"status": status, "findings": len(brief),
-                  "registered": registered,
+                  "registered": registered, "cause": cause,
+                  "acceptance": results,
                   "duration_ms": self._run_ms()}
         if error:
             detail["error"] = error[:300]
+        if failed:
+            detail["note"] = ("acceptance failed: " + ",".join(failed))[:300]
         self.receipts.append(
             agent_id=self.agent_id, task_id=task_id, action="task_end",
             detail=detail,
             outcome="ok" if status == "complete" else status)
         return {"task_id": task_id, "status": status, "findings": brief,
                 "registered": registered, "cost_nano": cost_nano,
-                "error": error}
+                "error": error, "cause": cause}
 
     def _record_check(self, task_id: str, subtask: str, message,
                       check: dict, attempt: int) -> None:
