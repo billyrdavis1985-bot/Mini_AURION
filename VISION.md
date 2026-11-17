@@ -66,6 +66,8 @@ capability (OPERATIONS section 2).
    `EXPERIMENTS.md`: what was tried, what it cost in money and time, what
    it showed, and whether the lesson is about agents or about this
    pipeline.
+6. **Blocking findings merge first.** A PR that fixes a blocking finding
+   merges before any PR that uses the affected path live.
 
 ## What the testbed must measure
 

@@ -58,3 +58,36 @@ PRs 1 to 4 do not need the operator's question. PR 5 does.
 - No change to the code-QA path or its prompts.
 
 Hardening budget inside B2: one hardening PR per build PR.
+
+## Frozen demo (committed before the run; the run follows it exactly)
+
+Seeded, not search: B2 has no discovery tool, and q1 showed a
+fetch-only investigator guesses dead URLs (10/12 failed, all 404).
+The frozen question names its entry page. URL discovery is future
+work (`docs/BACKLOG.md`). The operator's broad quantum-milestones
+question stays the milestone's motivating question; the frozen
+question below is the single-page scope the measured envelope
+allows (q1–q10: one page 4/4, multi-page 0/6).
+
+Frozen question, word for word:
+
+> Fetch https://www.ibm.com/quantum/roadmap and file exactly two
+> findings: one fact (a dated hardware milestone stated on that
+> page, quoted exactly, 12 to 200 characters) and one forecast
+> (your probability that milestone lands on time, with resolves_at
+> and criterion, resting on that fact). Reply with the JSON object
+> only. Do not fetch any other page.
+
+Frozen parameters: `--max-tools 4 --max-models 6`, cap $5.00,
+brief + same-provider verify on `eval/routing-research-same.json`,
+cross-provider verify on `eval/routing-research-cross.json`.
+Outputs: `eval/brief-frozen.json`, `eval/planted-q-frozen.json`
+(materialized, ignored), `eval/verify-frozen-same.json`,
+`eval/verify-frozen-cross.json`. The Monitor stays open on the
+eval root for the brief run.
+
+Frozen planted claim: `eval/planted-frozen.json` (committed). Its
+quote, snapshot and ref are materialized mechanically from the
+frozen brief's finding 1 after the run; the claim text itself must
+not be edited after seeing the brief. Void rule: if finding 1 is
+off the claim's topic, the run is void — re-freeze, don't edit.
