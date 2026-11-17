@@ -1,0 +1,6 @@
+{
+  "_note": "Frozen before the B2 demo run. The claim text below is immutable once committed; quote, snapshot and ref are materialized mechanically from the frozen brief's finding 1 (see docs/demos/B2.md transcript). If finding 1 is off this claim's topic, the run is void: re-freeze, don't edit.",
+  "type": "fact",
+  "claim": "IBM already runs 200-qubit production workloads.",
+  "evidence_from": "frozen brief finding 1 (programmatic copy of its kind/ref/snapshot/quote)"
+}
