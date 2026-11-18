@@ -49,7 +49,8 @@ class OrchestratorTests(unittest.TestCase):
         self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
         self.ledger = Ledger(os.path.join(self.tmp.name, "l.sqlite3"), **CAPS)
         self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
-                          file_root=self.root)
+                          file_root=self.root,
+                          mechanical_checks=frozenset({"critic"}))
 
     def tearDown(self):
         self.ledger.close()
@@ -422,6 +423,23 @@ class OrchestratorTests(unittest.TestCase):
         starts = [r for r in self.receipts.read_all()
                   if r["action"] == "task_start"]
         self.assertEqual(starts[0]["detail"]["routing"], "sha256:abc")
+
+    def test_accepted_findings_become_verified_notes(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"},
+                 {"id": "s2", "brief": "b2", "specialist": "beta"}),
+            {"alpha": [answer("A")], "beta": [answer("B")]},
+            synth_text="A and B")
+        orc.run("t1", "question?")
+        notes = self.mem.recall()
+        self.assertEqual(len(notes), 2)
+        self.assertEqual({n["author"] for n in notes}, {"alpha", "beta"})
+        self.assertTrue(all(n["status"] == "verified" for n in notes))
+        self.assertTrue(all(n["verified_by"] == "critic" for n in notes))
+        writes = [r for r in self.receipts.read_all()
+                  if r["action"] in ("memory_write", "memory_verify")]
+        self.assertEqual(len(writes), 4)
+        self.assertTrue(all(r["outcome"] == "ok" for r in writes))
 
 
 class SupportTests(unittest.TestCase):

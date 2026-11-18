@@ -378,7 +378,8 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
     state_dir.mkdir(parents=True, exist_ok=True)
     receipts = ReceiptStore(state_dir / "receipts.jsonl")
     memory = Memory(state_dir / "memory.sqlite3", file_root=tree,
-                    receipt_store=receipts)
+                    receipt_store=receipts,
+                    mechanical_checks=frozenset({"critic"}))
     try:
         registry = ToolRegistry()
         reader = TreeReader(tree)

@@ -21,7 +21,8 @@ class CriticTests(unittest.TestCase):
         self.receipts = ReceiptStore(os.path.join(self.tmp.name, "r.jsonl"))
         self.mem = Memory(os.path.join(self.tmp.name, "m.sqlite3"),
                           file_root=self.root,
-                          snapshot_dir=self.tmp.name)
+                          snapshot_dir=self.tmp.name,
+                          mechanical_checks=frozenset({"critic"}))
         self.critic = Critic("critic", self.mem, receipts=self.receipts)
         self.page_url = "https://example.com/x"
         self.page_snap, _ = write_snapshot(
@@ -216,6 +217,44 @@ class CriticTests(unittest.TestCase):
         result = self.critic.check(self.msg(
             evidence=[{"kind": "url", "ref": "https://unfetched.test/z"}]))
         self.assertEqual(result["verdict"], "fail")
+
+    def test_file_note_writes_and_verifies(self):
+        self.seed_read("a.txt")
+        entry = self.critic.file_note(
+            "t1", "spec", "Rates rose.",
+            [{"kind": "file", "ref": "a.txt:1",
+              "quote": "real file content"}])
+        self.assertEqual(entry["status"], "verified")
+        self.assertEqual(entry["verified_by"], "critic")
+        self.assertEqual([n["id"] for n in self.mem.recall()],
+                         [entry["id"]])
+        writes = [r for r in self.receipts.read_all()
+                  if r["action"] in ("memory_write", "memory_verify")]
+        self.assertEqual(len(writes), 2)
+        self.assertTrue(all(r["outcome"] == "ok" for r in writes))
+
+    def test_file_note_failure_receipts_and_returns_none(self):
+        entry = self.critic.file_note(
+            "t1", "spec", "Ghost claim.",
+            [{"kind": "file", "ref": "missing.txt:1"}])
+        self.assertIsNone(entry)
+        failed = [r for r in self.receipts.read_all()
+                  if r["action"] == "memory_verify"
+                  and r["outcome"] == "failed"]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("STALE_EVIDENCE", failed[0]["detail"]["error"])
+        self.assertEqual(self.mem.recall(), [])
+
+    def test_author_cannot_verify_its_own_note(self):
+        from mini_aurion.memory import MemoryError
+        self.seed_read("a.txt")
+        entry = self.mem.write(
+            "spec", "Rates rose.",
+            [{"kind": "file", "ref": "a.txt:1",
+              "quote": "real file content"}], task_id="t1")
+        with self.assertRaises(MemoryError) as ctx:
+            self.mem.verify(entry["id"], "spec")
+        self.assertEqual(ctx.exception.code, "SELF_VERIFY")
 
 
 if __name__ == "__main__":
