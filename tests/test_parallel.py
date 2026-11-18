@@ -231,7 +231,6 @@ class ParallelTests(unittest.TestCase):
         ledger = Ledger(os.path.join(self.tmp.name, "race.sqlite3"),
                         task_cap_nano=1000, daily_cap_nano=10_000,
                         global_cap_nano=100_000)
-        self.addCleanup(ledger.close)
         barrier = threading.Barrier(12)
         outcomes: list = []
         mu = threading.Lock()
@@ -251,11 +250,14 @@ class ParallelTests(unittest.TestCase):
             thread.start()
         for thread in threads:
             thread.join(timeout=30)
+        # Read the verdict, then close before tearDown: Windows will not
+        # delete an open database file.
+        live = ledger.spend("t-race")["inflight_nano"]
+        ledger.close()
         # 5 x 200 fills the 1000 cap; the other 7 refuse, exactly.
         self.assertEqual(sorted(outcomes),
                          [False] * 7 + [True] * 5)
-        self.assertEqual(
-            ledger.spend("t-race")["inflight_nano"], 1000)
+        self.assertEqual(live, 1000)
 
     def test_memory_write_verify_clean_under_threads(self):
         barrier = threading.Barrier(8)
