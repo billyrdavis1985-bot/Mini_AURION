@@ -337,6 +337,8 @@ class Orchestrator:
             if self._judge(task_id, question, sub, message):
                 return {"subtask": sub["id"], "status": "flagged",
                         "message": message}
+            self.critic.file_note(task_id, message.sender, message.claim,
+                                  message.evidence)
             return {"subtask": sub["id"], "status": "accepted",
                     "message": message}
         if check["verdict"] == "escalated":
@@ -354,6 +356,8 @@ class Orchestrator:
             if self._judge(task_id, question, sub, retry):
                 return {"subtask": sub["id"], "status": "flagged",
                         "message": retry}
+            self.critic.file_note(task_id, retry.sender, retry.claim,
+                                  retry.evidence)
             return {"subtask": sub["id"], "status": "accepted",
                     "message": retry}
         return {"subtask": sub["id"], "status": "escalated", "message": retry}
@@ -499,7 +503,8 @@ class Orchestrator:
             sender=specialist.agent_id, task_id=task_id,
             claim=message.claim, findings=findings))
         brief = self._verify_and_register(
-            task_id, findings, checked, predictions_path, models)
+            task_id, findings, checked, predictions_path, models,
+            author=specialist.agent_id)
         registered = len([r for r in self.receipts.read_all()
                           if r["task_id"] == task_id
                           and r["action"] == "forecast_registered"])
@@ -527,11 +532,14 @@ class Orchestrator:
 
     def _verify_and_register(self, task_id: str, findings: list,
                              checked: dict, predictions_path,
-                             models: list) -> list:
+                             models: list, author: str) -> list:
         """Support-check every critic-passed finding and register the
         forecasts. Forecasts register once the critic passes them,
         even support-flagged: the register records what was claimed,
-        and the brief carries the flag beside it."""
+        and the brief carries the flag beside it. Shared notes are
+        stricter than the register: only critic-passed findings
+        whose support also held are filed, so a verified note never
+        carries a claim the verifier flagged."""
         brief = []
         for finding, verdict in zip(findings, checked["findings"]):
             # Copy, then annotate: cherry-picking keys silently drops
@@ -555,6 +563,12 @@ class Orchestrator:
                     subtask=f"finding-{len(brief) + 1}")
                 entry["support"] = out["verdict"]
                 entry["support_reason"] = out["reason"]
+                if verdict["verdict"] == "pass" \
+                        and out["verdict"] == "supported":
+                    entry["note_id"] = (
+                        self.critic.file_note(
+                            task_id, author, entry["claim"],
+                            entry["evidence"]) or {}).get("id")
             brief.append(entry)
         registerable = [
             finding for finding, verdict in zip(findings, checked["findings"])

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import posixpath
 
+from .memory import MemoryError
 from .messages import AgentMessage, MessageError
 from .research import validate_finding
 
@@ -53,6 +54,46 @@ class Critic:
             self.catches += len(catches)
             return {"verdict": "fail", "catches": catches, "by": self.agent_id}
         return {"verdict": "pass", "catches": [], "by": self.agent_id}
+
+    def file_note(self, task_id: str, author: str, text: str,
+                  sources: list) -> dict | None:
+        """File a critic-passed finding as a shared note, then verify
+        it mechanically as this critic. Call only on findings this
+        critic passed: read-before-cite was established by the pass,
+        and verify() re-resolves existence. Assessment reasoning and
+        support-failed claims never reach here (the caller filters);
+        a verified note means the sources resolve, nothing more.
+        Failures receipt and return None: the finding stands, the
+        copy is dropped, and the missing note is visible."""
+        try:
+            entry = self.memory.write(author, text, sources,
+                                      task_id=task_id)
+        except MemoryError as exc:
+            self.receipts.append(
+                agent_id=self.agent_id, task_id=task_id,
+                action="memory_write",
+                detail={"error": str(exc)[:200]}, outcome="failed")
+            return None
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id,
+            action="memory_write",
+            detail={"entry_id": entry["id"],
+                    "status": entry["status"]}, outcome="ok")
+        try:
+            verified = self.memory.verify(
+                entry["id"], self.agent_id, mechanical=True)
+        except MemoryError as exc:
+            self.receipts.append(
+                agent_id=self.agent_id, task_id=task_id,
+                action="memory_verify",
+                detail={"entry_id": entry["id"],
+                        "error": str(exc)[:200]}, outcome="failed")
+            return None
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="memory_verify",
+            detail={"entry_id": entry["id"],
+                    "verified_by": self.agent_id}, outcome="ok")
+        return verified
 
     def _item_catches(self, task_id: str, item) -> list[str]:
         """One evidence item, fully checked: resolves, and was read or

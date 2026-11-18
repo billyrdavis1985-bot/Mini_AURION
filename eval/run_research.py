@@ -163,7 +163,8 @@ def run_mode(args, head: str) -> int:
     ledger = Ledger(state_dir / "ledger.sqlite3", task_cap_nano=cap_nano,
                     daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
     memory = Memory(state_dir / "memory.sqlite3", file_root=state_dir,
-                    receipt_store=receipts, snapshot_dir=state_dir)
+                    receipt_store=receipts, snapshot_dir=state_dir,
+                    mechanical_checks=frozenset({"critic"}))
     try:
         registry = ToolRegistry()
         registry.register(
@@ -293,7 +294,8 @@ def verify_mode(args, head: str) -> int:
                     task_cap_nano=cap_nano, daily_cap_nano=cap_nano,
                     global_cap_nano=cap_nano)
     memory = Memory(state_dir / "memory.sqlite3", file_root=state_dir,
-                    receipt_store=receipts, snapshot_dir=state_dir)
+                    receipt_store=receipts, snapshot_dir=state_dir,
+                    mechanical_checks=frozenset({"critic"}))
     try:
         verifier_model = router.model_for("verifier")
         orc = Orchestrator(

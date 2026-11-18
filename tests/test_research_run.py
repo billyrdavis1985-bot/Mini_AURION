@@ -81,7 +81,8 @@ class ResearchRunTests(unittest.TestCase):
         self.mem = Memory(os.path.join(self.state, "m.sqlite3"),
                           file_root=self.state,
                           receipt_store=self.receipts,
-                          snapshot_dir=self.state)
+                          snapshot_dir=self.state,
+                          mechanical_checks=frozenset({"critic"}))
         self.snapshot, _ = write_snapshot(
             self.state, url=URL, final_url=URL, status=200,
             content_type="text/plain", text=TEXT)
@@ -166,6 +167,58 @@ class ResearchRunTests(unittest.TestCase):
         self.assertEqual(out["registered"], 1)
         self.assertTrue(out["findings"][1]["registered"])
 
+    def test_supported_fact_filed_flagged_forecast_not(self):
+        reply = json.dumps({"findings": [fact(self.snapshot),
+                                         forecast(self.snapshot)]})
+        investigator = FakeModel([
+            {"text": "", "tool_calls": [
+                {"tool": "fetch_url", "args": {"url": URL}}]},
+            {"text": reply}])
+        verifier = FakeModel(
+            [{"text": "SUPPORTED: quotes match"},
+             {"text": "They match.\nSUPPORTED"},
+             {"text": "UNSUPPORTED: past the evidence"},
+             {"text": "Past it.\nUNSUPPORTED"}])
+        orc, _ = self.build(investigator, verifier)
+        out = orc.run_research(
+            "rq1", "which milestones?", contract=contract(),
+            predictions_path=self.predictions(),
+            models=["fixture/investigator", "fixture/verifier"])
+        notes = self.mem.recall()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["text"], out["findings"][0]["claim"])
+        self.assertEqual(notes[0]["status"], "verified")
+        self.assertEqual(out["findings"][0]["note_id"], notes[0]["id"])
+        self.assertIsNone(out["findings"][1].get("note_id"))
+
+    def test_judgment_never_filed_even_when_supported(self):
+        judged = {"type": "assessment",
+                  "claim": "Rates will keep rising.",
+                  "reasoning": "two quarters of growth",
+                  "evidence": [cite(self.snapshot)]}
+        reply = json.dumps({"findings": [judged]})
+        investigator = FakeModel([
+            {"text": "", "tool_calls": [
+                {"tool": "fetch_url", "args": {"url": URL}}]},
+            {"text": reply}])
+        verifier = FakeModel([{"text": "SUPPORTED: quotes match"},
+                              {"text": "They match.\nSUPPORTED"}])
+        orc, _ = self.build(investigator, verifier)
+        out = orc.run_research(
+            "rq1", "which milestones?", contract=contract(),
+            predictions_path=self.predictions(), models=["m"])
+        self.assertEqual(out["findings"][0]["support"], "supported")
+        self.assertEqual(self.mem.recall(), [])
+        self.assertNotIn("note_id", out["findings"][0])
+
+    def test_unverified_note_excluded_from_default_recall(self):
+        entry = self.mem.write("spec", "Draft claim.",
+                               [cite(self.snapshot)], task_id="rq1")
+        self.assertEqual(self.mem.recall(), [])
+        self.assertEqual(
+            [n["id"] for n in
+             self.mem.recall(include_unverified=True)], [entry["id"]])
+
     def test_malformed_reply_gets_one_retry(self):
         reply = json.dumps({"findings": [fact(self.snapshot)]})
         investigator = FakeModel([
@@ -231,7 +284,8 @@ class VerifyFindingsTests(unittest.TestCase):
         self.mem = Memory(os.path.join(self.state, "m.sqlite3"),
                           file_root=self.state,
                           receipt_store=self.receipts,
-                          snapshot_dir=self.state)
+                          snapshot_dir=self.state,
+                          mechanical_checks=frozenset({"critic"}))
         self.snapshot, _ = write_snapshot(
             self.state, url=URL, final_url=URL, status=200,
             content_type="text/plain", text=TEXT)
