@@ -26,7 +26,7 @@ and probabilities, which is why the later milestones exist.
 | Every action leaves a receipt | Hash-chained receipts, spend ledger, policy gate, task contracts, scope gate | **Built** | `tests/`, drift-batch-2 (gate holds) |
 | Cheap tiers do volume | Different models (ideally different providers) in different roles, chosen by a router | **Built** | `docs/demos/B1.md` |
 | Premium tiers decide and verify | A verifier on a different model/provider than the investigator; flags, never clears | **Built** | `docs/demos/B1.md` |
-| Research system | Open questions answered from real outside sources, not only the repo's own code | Not started | B2 demo |
+| Research system | Open questions answered from real outside sources, not only the repo's own code | **Built** | `docs/demos/B2.md` |
 | Multi-agent | Agents that build on each other's **verified** findings through shared memory, not one model wearing several hats | In name only | B3 demo |
 | Autonomous workflow | A task runs several steps without the operator between them, inside stage bounds | Partial (single task, read-only) | B3 demo + M7 |
 | Operator control | Kill switch, caps and approvals with a surface the operator can use | **Built** | `docs/demos/monitor.md` |

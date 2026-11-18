@@ -226,3 +226,42 @@ kept (OPERATIONS section 7).
   `service_overloaded` outage, which is provider weather, not a
   regression. Score lines from outage runs should be annotated, not
   compared.
+
+## F13. The research envelope: one page works, two pages refuse
+
+- **Tried:** B2 milestone (#79 fetch_url, #80 URL quotes, #81 claim
+  types, #83 support verifier, #84 research runner, #86 budget
+  flags, #87/#88 verify replay fixes, #89 M1–M4, #90 freeze):
+  eleven exploratory briefs q1–q10 plus exploratory verifies
+  ($0.71), then one frozen demo run ($0.067) with the Monitor
+  open (`docs/demos/B2.md`).
+- **Result:** the frozen brief filed one supported fact and one
+  correctly flagged forecast (roadmap plan vs guaranteed
+  achievement), registered the forecast, and both a same-provider
+  and a cross-provider verifier caught the planted claim while
+  standing the genuine fact: 0 false flags. Cost per finding
+  $0.0182. The exploratory series mapped the envelope instead of
+  tuning against it: unseeded URL guessing all 404s (q1); open and
+  bounded multi-page briefs refuse even holding 9–13 fetched pages
+  with quotable milestones (q2–q5, q7, q8: 0/6); single-page
+  briefs complete 4/4 (q6, q6b, q9, q10). The freeze narrowed to
+  the proven envelope. The demo also caught two real measurement
+  artifacts pre-freeze: verify replays stripped forecast fields
+  (#87) and the brief never recorded them (#88).
+- **Cost:** frozen demo $0.0670 over 56 s (brief $0.0363,
+  same-verify $0.0299, cross-verify $0.0008 at operator-confirmed
+  DeepSeek rates); exploratory path $0.71. Verification dominates
+  as F8 predicted: the brief's 4 support calls cost more than its
+  investigation.
+- **Lesson (agents, portable):** a "never guess" investigator with
+  multi-page context degrades to "never answer": five runs held
+  quotable milestones and still said CANNOT_VERIFY. Filing orders
+  don't fix it; narrowing the task does. Scope the brief to what
+  the model demonstrably files, and record the envelope as the
+  finding.
+- **Lesson (pipeline):** freeze the question and the planted claim
+  before the run and read them from the frozen files at run time;
+  retyping either voids the point. Reviewer blocking calls only
+  work if they block: B2 ran eleven exploratory briefs against
+  code with four known findings open, which is why VISION.md rule
+  6 now says blocking fixes merge before live use.
