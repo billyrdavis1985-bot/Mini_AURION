@@ -21,10 +21,7 @@ milestone needs it (VISION.md rule 4).
 | `kill_task` signals the pid in `proc.json`; a dead pid reused by the OS would hit an unrelated process. Close by recording process start time and checking before signalling. | #72 backlog note | when next touched |
 | `fetch_url` has a per-operation socket timeout but no total deadline: a slow-drip server can hold one fetch for minutes within the size cap. Add a wall-clock deadline per fetch. | B2 review (#79) | before B2 runs unattended |
 | `fetch_url` caps the **raw** body at 256 KB; github.com alone exceeded it in #79's live check. Most modern pages will. Cap the raw read higher (e.g. 2 MB) and cap the **extracted text** at what the context can carry. | #79 live evidence | before the B2 demo (or the demo measures how many fetches refuse) |
-| Brief state dirs (`eval/<brief>/` with snapshots of fetched pages, ledgers, receipts) are not gitignored; `repo_state` ignores untracked files, so a `git add -A` would commit fetched web content. Ignore `eval/brief-*/`, `eval/verify-*`, or move state out of the tree. | B2 review (#84) | before the B2 demo |
 | `FetchBackend(allow_private=True)` disables D5 entirely; it exists for loopback tests. The research runner should assert it is off, so no future flag or config path can enable it live. | B2 review (#79) | when next touched |
-| D3 as built differs from ADR-003: two verifier calls per finding (two phrasings, both must agree), no OVERREACH verdict, fail-closed on error. Doubles the dominant cost (F8). Record as a decision (amend ADR-003 D3) once the demo shows whether the second call changes verdicts. | B2 review (#82) | B2 demo |
-| The support prompt asks whether "even a weak reading" lets the claim be false; this biases toward UNSUPPORTED. The demo must report the false-flag rate on genuine facts next to the planted-claim catch, or the catch is uninterpretable. | B2 review (#82) | B2 demo write-up |
 
 ## Closed
 
@@ -38,3 +35,6 @@ milestone needs it (VISION.md rule 4).
 | Approvals for `gated` actions are not plumbed to any operator surface | #71 (approvals queue + specialist pause) |
 | Process-level kill switch does not exist | #71 (SIGTERM/SIGKILL + kill receipt + refund; demo `docs/demos/monitor.md`) |
 | Routing hash computed before `"model": ""` resolves | #70 (hash commits the resolved provider/model) |
+| The support prompt asks whether "even a weak reading" lets the claim be false; this biases toward UNSUPPORTED. The demo must report the false-flag rate on genuine facts next to the planted-claim catch, or the catch is uninterpretable. | #91 (B2.md reports 0 genuine facts flagged) |
+| D3 as built differs from ADR-003: two verifier calls per finding (two phrasings, both must agree), no OVERREACH verdict, fail-closed on error. Doubles the dominant cost (F8). Record as a decision (amend ADR-003 D3) once the demo shows whether the second call changes verdicts. | #92 (as-built recorded with 8/8 agreement data) |
+| Brief state dirs (`eval/<brief>/` with snapshots of fetched pages, ledgers, receipts) are not gitignored; `repo_state` ignores untracked files, so a `git add -A` would commit fetched web content. Ignore `eval/brief-*/`, `eval/verify-*`, or move state out of the tree. | #89 (gitignore brief/verify/planted/livefetch outputs) |
