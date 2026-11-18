@@ -75,6 +75,22 @@ critic like any evidence-free claim today. **[code].**
 - Unparseable verifier replies are receipted errors that keep the
   claim flagged as "unverified", never cleared.
 
+**As built (B2 demo, PR #83; recorded here per the B2 backlog).**
+D3 as built differs from the above in four ways: two verifier
+calls per finding (positive phrasing plus reason-why-not) that
+must agree exactly on `SUPPORTED`, otherwise the claim fails;
+no `OVERREACH` verdict (overreach reads as `UNSUPPORTED` with a
+reason); model errors are a distinct `error` verdict that fails
+closed and invalidates the run (M3), not a flag; relevance is not
+checked (nothing filed in the demo was off-topic; multi-topic
+briefs would need it back). The frozen demo measured agreement
+8/8 (3 supported, 5
+unsupported, 0 splits, 0 unparseable): the second call changed no
+verdict at twice the dominant cost (F8). Retained for now on an
+n=8 sample; the agreement count in `support_check` receipts is the
+standing metric, and the first observed split reopens this
+decision.
+
 ### D4. Forecasts go to a register; calibration comes later
 
 - Every `forecast` is appended to `predictions.jsonl` (append-only,
