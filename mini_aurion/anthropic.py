@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -101,6 +102,9 @@ class AnthropicModel:
         self.url = config.base_url.rstrip("/") + "/v1/messages"
         self.last_cost_nano = 0
         self.calls = 0
+        # See MuseModel.mu: callers hold this across complete() +
+        # the cost read-back when models are shared across threads.
+        self.mu = threading.Lock()
         self._opener = opener_for(config.base_url, AnthropicError)
 
     def worst_case_nano(self, messages: list,

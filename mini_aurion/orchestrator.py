@@ -9,7 +9,10 @@ chatter is capped by a message budget.
 """
 from __future__ import annotations
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
@@ -37,11 +40,19 @@ class Orchestrator:
                  planner_prompt: str | None = None,
                  judge_prompt: str | None = None,
                  verifier_model=None,
-                 routing_hash: str | None = None):
+                 routing_hash: str | None = None,
+                 max_workers: int = 1):
         """model_estimate_nano is required: 0 asserts the builder knows the
         model is free. Metering is never silently off. With a contract, the
         plan is validated against its criteria and completion requires every
-        acceptance check; acceptance holds (criterion id, checker) pairs."""
+        acceptance check; acceptance holds (criterion id, checker) pairs.
+        max_workers above 1 delegates subtasks on threads; findings still
+        merge in subtask order, never finish order. Sharing rules: one
+        wrapper per specialist (the duplicate cache points at content
+        "above in this investigation"); models may be shared (the
+        complete+cost read is locked) but per-specialist models keep
+        calls from serializing. The stores, the message budget, and
+        the critic's counter are locked for sharing."""
         if not isinstance(model_estimate_nano, int) or model_estimate_nano < 0:
             raise ValueError("model_estimate_nano must be a non-negative int")
         self.agent_id = agent_id
@@ -62,7 +73,19 @@ class Orchestrator:
         # never from a string an agent supplies.
         self.verifier_model = verifier_model or model
         self.routing_hash = routing_hash
+        if not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive int")
+        self.max_workers = max_workers
+        self._mu = threading.Lock()
         self.messages_used = 0
+
+    def _messages_spent(self) -> int:
+        with self._mu:
+            return self.messages_used
+
+    def _spend_message(self) -> None:
+        with self._mu:
+            self.messages_used += 1
 
     def _complete(self, task_id: str, messages: list,
                   system: str | None = None,
@@ -78,15 +101,21 @@ class Orchestrator:
             except LedgerError as exc:
                 raise _ModelRefused(str(exc)) from exc
         call_started = time.perf_counter()
-        if system is None:
-            reply = model.complete(messages, tools=[])
-        else:
-            reply = model.complete(messages, tools=[],
-                                   system_prompt=system)
-        call_ms = int((time.perf_counter() - call_started) * 1000)
-        if reservation is not None:
-            actual = getattr(model, "last_cost_nano", 0) or 0
-            self.ledger.settle(reservation, actual)
+        # complete() + the cost read-back is one atomic unit: parallel
+        # delegates share this model for relevance judges, and a bare
+        # read could settle with another call's cost. Models without a
+        # lock predate threads; they keep the old serial behavior.
+        model_mu = getattr(model, "mu", None) or nullcontext()
+        with model_mu:
+            if system is None:
+                reply = model.complete(messages, tools=[])
+            else:
+                reply = model.complete(messages, tools=[],
+                                       system_prompt=system)
+            call_ms = int((time.perf_counter() - call_started) * 1000)
+            if reservation is not None:
+                actual = getattr(model, "last_cost_nano", 0) or 0
+                self.ledger.settle(reservation, actual)
         # The orchestrator's own calls are receipted like the
         # specialist's: without this the judge and synthesis are
         # invisible, and no receipt says which model judged.
@@ -169,11 +198,29 @@ class Orchestrator:
             outcome="ok" if subtasks else "denied")
         findings: list[dict] = refused
         unattempted: list[str] = []
-        for sub in subtasks:
-            if self.messages_used >= self.message_budget:
-                unattempted.append(sub["id"])
-                continue
-            findings.append(self._delegate(task_id, sub, question))
+        if self.max_workers == 1:
+            for sub in subtasks:
+                if self.messages_used >= self.message_budget:
+                    unattempted.append(sub["id"])
+                    continue
+                findings.append(self._delegate(task_id, sub, question))
+        else:
+            # Parallel admission is one pre-check per subtask: delegates
+            # race, so checking inside each thread would admit by luck
+            # of the draw. pool.map preserves input order, so the brief
+            # merges by subtask, not by finish time.
+            runnable = []
+            for sub in subtasks:
+                if self._messages_spent() >= self.message_budget:
+                    unattempted.append(sub["id"])
+                else:
+                    runnable.append(sub)
+            with ThreadPoolExecutor(
+                    max_workers=self.max_workers,
+                    thread_name_prefix="ma-spec") as pool:
+                findings.extend(pool.map(
+                    lambda sub: self._delegate(task_id, sub, question),
+                    runnable))
         accepted = [f for f in findings if f["status"] == "accepted"]
         synth_note = ""
         if not accepted:
@@ -344,7 +391,7 @@ class Orchestrator:
         if check["verdict"] == "escalated":
             return {"subtask": sub["id"], "status": "escalated",
                     "message": message}
-        if self.messages_used >= self.message_budget:
+        if self._messages_spent() >= self.message_budget:
             return {"subtask": sub["id"], "status": "escalated",
                     "message": message}
         retry = self._investigate(
@@ -664,5 +711,5 @@ class Orchestrator:
                     "evidence": message.evidence[:10]}, outcome="ok")
 
     def _investigate(self, task_id: str, specialist, brief: str) -> AgentMessage:
-        self.messages_used += 1
+        self._spend_message()
         return specialist.investigate(task_id, brief)

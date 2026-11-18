@@ -10,6 +10,7 @@ loop converges to an answer or an explicit escalation.
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 
 from .fixture import ESCALATE_TEXT
 from .ledger import LedgerError
@@ -69,17 +70,22 @@ class Specialist:
             offered = [] if converging \
                 else self.tools.registry.definitions()
             call_started = time.perf_counter()
-            if self.investigator_prompt is None:
-                reply = self.model.complete(messages, tools=offered)
-            else:
-                reply = self.model.complete(
-                    messages, tools=offered,
-                    system_prompt=self.investigator_prompt)
-            call_ms = int((time.perf_counter() - call_started) * 1000)
-            if reservation is not None:
-                actual = getattr(self.model, "last_cost_nano", 0) or 0
-                self.tools.ledger.settle(reservation, actual)
-                cost_nano += actual
+            # complete() + the cost read-back is one atomic unit (see
+            # Orchestrator._complete): a shared model must not settle
+            # one call with another call's cost.
+            model_mu = getattr(self.model, "mu", None) or nullcontext()
+            with model_mu:
+                if self.investigator_prompt is None:
+                    reply = self.model.complete(messages, tools=offered)
+                else:
+                    reply = self.model.complete(
+                        messages, tools=offered,
+                        system_prompt=self.investigator_prompt)
+                call_ms = int((time.perf_counter() - call_started) * 1000)
+                if reservation is not None:
+                    actual = getattr(self.model, "last_cost_nano", 0) or 0
+                    self.tools.ledger.settle(reservation, actual)
+                    cost_nano += actual
             calls = [] if converging else reply.get("tool_calls", [])
             self.tools.receipts.append(
                 agent_id=self.agent_id, task_id=task_id, action="model_call",

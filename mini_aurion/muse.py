@@ -19,6 +19,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import threading
 import typing
 import urllib.request
 from dataclasses import dataclass, field
@@ -268,6 +269,10 @@ class MuseModel:
         self.url = config.base_url.rstrip("/") + "/chat/completions"
         self.last_cost_nano = 0
         self.calls = 0
+        # Held by callers across complete() + the last_cost_nano
+        # read-back, so parallel delegates sharing one model settle
+        # each call with its own cost.
+        self.mu = threading.Lock()
         self._opener = opener_for(config.base_url, MuseError)
 
     def worst_case_nano(self, messages: list, max_new_text_chars: int = 0) -> int:

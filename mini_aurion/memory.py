@@ -17,11 +17,13 @@ expired entry are flagged `derived-unverified`, never quietly kept.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +38,17 @@ class MemoryError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(f"{code}: {message}")
         self.code = code
+
+
+def _locked(method):
+    # One reentrant lock per memory: sqlite connections are not
+    # thread-safe. RLock because write()/verify()/dispute() funnel
+    # back through get().
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._mu:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class Memory:
@@ -54,7 +67,9 @@ class Memory:
                 raise MemoryError("BAD_FIELD", "check ids carry no prefix")
         self.mechanical_checks = frozenset(mechanical_checks)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(self.path))
+        self._mu = threading.RLock()
+        self.db = sqlite3.connect(str(self.path),
+                                  check_same_thread=False)
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS entries ("
             " id TEXT PRIMARY KEY, author TEXT NOT NULL, text TEXT NOT NULL,"
@@ -65,9 +80,11 @@ class Memory:
             " verify_hashes TEXT NOT NULL DEFAULT '{}')")
         self.db.commit()
 
+    @_locked
     def close(self) -> None:
         self.db.close()
 
+    @_locked
     def check_source(self, source: dict, task_id: str = "") -> str | None:
         """Return None if the pointer resolves, else a reason string.
 
@@ -180,6 +197,7 @@ class Memory:
             return f"quote not in snapshot {snapshot[:12]}…"
         return None
 
+    @_locked
     def write(self, author: str, text: str, sources: list[dict], *,
               derived_from: list[str] | None = None,
               ttl_seconds: int = DEFAULT_TTL_SECONDS,
@@ -231,6 +249,7 @@ class Memory:
         return row is not None and row[0] in ("expired", "derived-unverified",
                                               "disputed")
 
+    @_locked
     def get(self, entry_id: str) -> dict:
         row = self.db.execute(
             "SELECT id, author, text, sources, status, verified_by, reason,"
@@ -245,6 +264,7 @@ class Memory:
                 "created_at": row[7], "expires_at": row[8],
                 "derived_from": json.loads(row[9]), "task_id": row[10]}
 
+    @_locked
     def verify(self, entry_id: str, verifier: str, *,
                mechanical: bool = False) -> dict:
         """Mark verified. Verifier must differ from the author. Mechanical
@@ -305,6 +325,7 @@ class Memory:
                 digest.update(chunk)
         return digest.hexdigest()
 
+    @_locked
     def dispute(self, entry_id: str, by: str, reason: str) -> dict:
         self.get(entry_id)
         self.db.execute(
@@ -313,6 +334,7 @@ class Memory:
         self.db.commit()
         return self.get(entry_id)
 
+    @_locked
     def expire_sweep(self, now: float | None = None) -> dict:
         """Expire stale entries; flag their dependents. Returns counts."""
         now = time.time() if now is None else now
@@ -344,6 +366,7 @@ class Memory:
         self.db.commit()
         return {"expired": len(expired), "flagged": flagged}
 
+    @_locked
     def recall(self, *, include_unverified: bool = False) -> list[dict]:
         """Retrieve entries. Disputed and expired are never returned.
 

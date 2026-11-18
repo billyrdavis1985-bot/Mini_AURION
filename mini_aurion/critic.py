@@ -13,6 +13,7 @@ snapshot hash matches the cited one.
 from __future__ import annotations
 
 import posixpath
+import threading
 
 from .memory import MemoryError
 from .messages import AgentMessage, MessageError
@@ -35,7 +36,14 @@ class Critic:
         self.receipts = receipts
         self.read_tools = read_tools
         self.fetch_tools = fetch_tools
+        self._mu = threading.Lock()
         self.catches = 0
+
+    def _caught(self, count: int) -> None:
+        # Parallel delegates share one critic; the demo transcript
+        # reads this counter, so increments stay exact under threads.
+        with self._mu:
+            self.catches += count
 
     def check(self, message: AgentMessage) -> dict:
         if message.escalated:
@@ -44,14 +52,14 @@ class Critic:
         try:
             message.require_evidence()
         except MessageError as exc:
-            self.catches += 1
+            self._caught(1)
             return {"verdict": "fail", "catches": [str(exc)],
                     "by": self.agent_id}
         catches = []
         for item in message.evidence:
             catches.extend(self._item_catches(message.task_id, item))
         if catches:
-            self.catches += len(catches)
+            self._caught(len(catches))
             return {"verdict": "fail", "catches": catches, "by": self.agent_id}
         return {"verdict": "pass", "catches": [], "by": self.agent_id}
 
@@ -125,7 +133,7 @@ class Critic:
             return {"verdict": "escalated", "catches": [],
                     "findings": [], "by": self.agent_id}
         if not message.findings:
-            self.catches += 1
+            self._caught(1)
             return {"verdict": "fail",
                     "catches": ["no findings filed"],
                     "findings": [], "by": self.agent_id}
@@ -148,7 +156,7 @@ class Critic:
                 verdict = "pass"
             checked.append({"type": ftype, "verdict": verdict,
                             "catches": reasons})
-        self.catches += failed
+        self._caught(failed)
         return {"verdict": "fail" if failed else "pass",
                 "catches": [c for one in checked for c in one["catches"]],
                 "findings": checked, "by": self.agent_id}

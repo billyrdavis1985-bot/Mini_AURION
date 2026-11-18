@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -107,6 +108,9 @@ class GoogleModel:
                     + safe_model + ":generateContent")
         self.last_cost_nano = 0
         self.calls = 0
+        # See MuseModel.mu: callers hold this across complete() +
+        # the cost read-back when models are shared across threads.
+        self.mu = threading.Lock()
         self._opener = opener_for(config.base_url, GoogleError)
 
     def worst_case_nano(self, messages: list,
