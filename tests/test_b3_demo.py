@@ -14,8 +14,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval.demo_b3 import PART_CASES, QUESTION, _wall_clock, run_leg  # noqa: E402
-from eval.grade_code_qa import TreeReader  # noqa: E402
+from eval.demo_b3 import (PART_CASES, QUESTION, _wall_clock,  # noqa: E402
+                             build_brief, run_leg)
+from eval.grade_code_qa import (EXACTNESS_NOTE, QUOTE_NOTE,  # noqa: E402
+                                TreeReader)
 from mini_aurion.contract import load_contract  # noqa: E402
 from mini_aurion.fixture import FakeModel  # noqa: E402
 from mini_aurion.router import Router, load_routing_table  # noqa: E402
@@ -105,8 +107,14 @@ class B3DemoTests(unittest.TestCase):
                 "orchestrator": FakeModel([plan, judge, judge, synth])}
 
     def _brief(self):
-        return (QUESTION + "\n\nTop-level layout:\n"
-                + TreeReader(self.tree).layout())
+        return build_brief(QUESTION, self.tree)
+
+    def test_brief_matches_code_qa_loop_assembly(self):
+        brief = build_brief(QUESTION, self.tree)
+        self.assertTrue(brief.startswith(QUESTION))
+        self.assertIn(EXACTNESS_NOTE, brief)
+        self.assertIn(QUOTE_NOTE, brief)
+        self.assertIn("Top-level layout", brief)
 
     def test_question_is_frozen_word_for_word(self):
         self.assertEqual(QUESTION, FROZEN_QUESTION)

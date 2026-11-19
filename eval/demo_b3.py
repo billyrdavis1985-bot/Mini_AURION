@@ -23,7 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval.grade_code_qa import (NANO_PER_USD, TreeReader, grade,  # noqa: E402
+from eval.grade_code_qa import (EXACTNESS_NOTE, NANO_PER_USD,  # noqa: E402
+                                QUOTE_NOTE, TreeReader, grade,
                                 repo_state, tree_commit)
 from mini_aurion.contract import contract_hash, load_contract  # noqa: E402
 from mini_aurion.contract import scope_denials  # noqa: E402
@@ -107,6 +108,17 @@ def _wall_clock(receipts_path: Path) -> dict:
 def _seat_of(model) -> dict:
     return {"provider": getattr(model, "provider", "?"),
             "model": getattr(model, "model", "?")}
+
+
+def build_brief(question: str, tree: Path) -> str:
+    """Demo brief, assembled exactly like the code-QA loop's: question
+    plus the exactness/quote discipline notes plus the tree layout.
+    The frozen question text itself is untouched."""
+    reader = TreeReader(tree)
+    return (question + EXACTNESS_NOTE + QUOTE_NOTE
+            + "\n\nTop-level layout of the repo you are"
+            " searching (orient yourself, then read the file most"
+            " likely to hold the answer):\n" + reader.layout())
 
 
 def run_leg(question: str, brief: str, task_id: str, tree: Path,
@@ -255,10 +267,7 @@ def main(argv=None) -> int:
     missing = [c for c in PART_CASES if c not in cases]
     if missing:
         return _refuse(f"frozen set lacks demo parts: {missing}")
-    reader = TreeReader(tree)
-    brief = (QUESTION + "\n\nTop-level layout of the repo you are"
-             " searching (orient yourself, then read the file most"
-             " likely to hold the answer):\n" + reader.layout())
+    brief = build_brief(QUESTION, tree)
     print(f"cap: {args.cap_usd} USD (flag override)")
     print(f"contract: {contract.contract_id} v{contract.version}")
     print(f"routing: {args.routing} {router.table_hash()[:19]}")
