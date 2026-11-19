@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval.demo_b3 import (PART_CASES, QUESTION, _wall_clock,  # noqa: E402
-                             build_brief, run_leg)
+                             build_brief, legs_for, run_leg)
 from eval.grade_code_qa import (EXACTNESS_NOTE, QUOTE_NOTE,  # noqa: E402
                                 TreeReader)
 from mini_aurion.contract import load_contract  # noqa: E402
@@ -157,6 +157,12 @@ class B3DemoTests(unittest.TestCase):
                 self.assertIn(snippet, leg["text"])
         self.assertEqual(results["serial"]["text"],
                          results["parallel"]["text"])
+
+    def test_legs_for_selects_legs(self):
+        self.assertEqual(legs_for("serial"), [("serial", 1)])
+        self.assertEqual(legs_for("parallel"), [("parallel", 2)])
+        self.assertEqual(legs_for("both"),
+                         [("serial", 1), ("parallel", 2)])
 
     def test_wall_clock_reads_receipts(self):
         receipts = self.root / "r.jsonl"
