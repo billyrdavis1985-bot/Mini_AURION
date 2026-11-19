@@ -103,7 +103,8 @@ class MemoryFindings(_Tmp):
         super().setUp()
         self.rs = ReceiptStore(self.p("r.jsonl"))
         self.mem = Memory(self.p("m.db"), file_root=self.root,
-                          receipt_store=self.rs)
+                          receipt_store=self.rs,
+                          mechanical_checks=frozenset({"critic"}))
 
     def tearDown(self):
         self.mem.close()
@@ -237,7 +238,8 @@ class AgentLoopFindings(_Tmp):
         self.led = Ledger(self.p("l.db"), task_cap_nano=100_000,
                           daily_cap_nano=100_000, global_cap_nano=100_000)
         self.mem = Memory(self.p("m.db"), file_root=self.root,
-                          receipt_store=self.rs)
+                          receipt_store=self.rs,
+                          mechanical_checks=frozenset({"critic"}))
         open(os.path.join(self.root, "a.txt"), "w").write(
             "real file content here")
         self.backend = _CostlyTools({"delete_everything": "DELETED"})

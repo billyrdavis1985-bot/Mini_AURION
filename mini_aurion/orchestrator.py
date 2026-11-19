@@ -9,6 +9,7 @@ chatter is capped by a message budget.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +17,7 @@ from contextlib import nullcontext
 
 from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
+from .memory import MemoryError
 from .messages import AgentMessage
 from .research import (SUPPORT_PROMPT, SUPPORT_REASON_PROMPT,
                        parse_research_reply, parse_support_verdict,
@@ -28,7 +30,9 @@ class _ModelRefused(Exception):
 
 SYNTH_FORMAT = ("Reply in the brief's requested format. Cite evidence "
                 "as path:line plus the exact quoted text (12+ characters "
-                "copied from that line).")
+                "copied from that line). Cite supporting notes by their "
+                "[mem_...] id; cite only notes given above.")
+NOTE_ID_RE = re.compile(r"mem_[0-9a-f]{16}")
 
 
 class Orchestrator:
@@ -226,18 +230,47 @@ class Orchestrator:
         if not accepted:
             return self._finish(task_id, findings, unattempted, "escalated",
                                 "CANNOT_VERIFY: no accepted findings", [], "")
+        # Verified-only synthesis: the prompt holds verified notes, never
+        # raw claims. file_note can fail (the finding stands, the copy is
+        # dropped), so re-check each note's live status here: fail closed
+        # on what the store says now, not on filing memory.
+        notes = []
+        for finding in accepted:
+            note_id = finding.get("note_id")
+            if not note_id:
+                continue
+            try:
+                entry = self.critic.memory.get(note_id)
+            except MemoryError:
+                continue
+            if entry["status"] == "verified" \
+                    and entry.get("task_id") == task_id:
+                notes.append(entry)
+        if not notes:
+            return self._finish(
+                task_id, findings, unattempted, "partial",
+                "PARTIAL:\nCANNOT_VERIFY: no verified notes to synthesize",
+                [], "synthesis refused: no verified notes")
         try:
-            # Synthesis sees the question, not just the claims: without it
+            # Synthesis sees the question, not just the notes: without it
             # the summary drifts and the critic usually sends it to fallback.
             synthesis = self._complete(
                 task_id, [{"role": "format", "text": SYNTH_FORMAT},
                           {"role": "question", "text": question}] +
-                [{"role": f["subtask"], "text": f["message"].claim}
-                 for f in accepted],
+                [{"role": "note", "text": f"[{n['id']}] {n['text']}"}
+                 for n in notes],
                 role="synthesis")
         except _ModelRefused as exc:
             synthesis = None
             synth_note = f"synthesis refused: {exc}"
+        if synthesis is not None:
+            bad_cites = [c for c in NOTE_ID_RE.findall(
+                synthesis.get("text") or "")
+                if c not in {n["id"] for n in notes}]
+            if bad_cites:
+                synthesis = None
+                synth_note = ("synthesis cited notes outside this task's "
+                              f"verified set: {bad_cites}")[:300]
         if synthesis is not None:
             synth_msg = AgentMessage(
                 sender=self.agent_id, task_id=task_id,
@@ -262,11 +295,13 @@ class Orchestrator:
                               f" {check['catches']}")[:300]
         # The marker rides on its own line: glued onto the first claim line
         # it eats a leading bullet ("PARTIAL: - ..." is not a bullet).
-        fallback = "PARTIAL:\n" + "; ".join(
-            f["message"].claim for f in accepted)[:2000]
+        # Fallback draws from the same verified notes, never raw claims;
+        # each note id rides on its own line for the same reason.
+        fallback = "PARTIAL:\n" + "\n".join(
+            f"[{n['id']}]\n{n['text']}" for n in notes)[:2000]
         evidence = []
-        for finding in accepted:
-            evidence.extend(finding["message"].evidence)
+        for note in notes:
+            evidence.extend(note["sources"])
         return self._finish(task_id, findings, unattempted, "partial",
                             fallback, evidence, synth_note)
 
@@ -384,10 +419,12 @@ class Orchestrator:
             if self._judge(task_id, question, sub, message):
                 return {"subtask": sub["id"], "status": "flagged",
                         "message": message}
-            self.critic.file_note(task_id, message.sender, message.claim,
-                                  message.evidence)
+            filed = self.critic.file_note(
+                task_id, message.sender, message.claim,
+                message.evidence)
             return {"subtask": sub["id"], "status": "accepted",
-                    "message": message}
+                    "message": message,
+                    "note_id": (filed or {}).get("id")}
         if check["verdict"] == "escalated":
             return {"subtask": sub["id"], "status": "escalated",
                     "message": message}
@@ -403,10 +440,11 @@ class Orchestrator:
             if self._judge(task_id, question, sub, retry):
                 return {"subtask": sub["id"], "status": "flagged",
                         "message": retry}
-            self.critic.file_note(task_id, retry.sender, retry.claim,
-                                  retry.evidence)
+            filed = self.critic.file_note(
+                task_id, retry.sender, retry.claim, retry.evidence)
             return {"subtask": sub["id"], "status": "accepted",
-                    "message": retry}
+                    "message": retry,
+                    "note_id": (filed or {}).get("id")}
         return {"subtask": sub["id"], "status": "escalated", "message": retry}
 
     def _judge(self, task_id: str, question: str, sub: dict,
