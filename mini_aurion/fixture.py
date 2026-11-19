@@ -9,6 +9,8 @@ Costs are always zero; total_cost_nano pins that property for tests.
 """
 from __future__ import annotations
 
+import threading
+
 ESCALATE_TEXT = "CANNOT_VERIFY"
 
 
@@ -26,6 +28,9 @@ class FakeModel:
         self.model = "fake"
         self.calls = 0
         self.last_cost_nano = 0
+        # See MuseModel.mu: same protocol as the live models, so
+        # threaded tests exercise the same locking callers use live.
+        self.mu = threading.Lock()
         self.seen: list[list] = []
         self.offered: list[list] = []
         self.systems: list = []

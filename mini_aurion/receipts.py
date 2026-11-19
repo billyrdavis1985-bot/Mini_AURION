@@ -14,10 +14,12 @@ itself a receipt (append-only: nothing is ever mutated), linked by seq.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -29,6 +31,17 @@ class ReceiptError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(f"{code}: {message}")
         self.code = code
+
+
+def _locked(method):
+    # One reentrant lock per store: threads serialize on appends so
+    # seq numbers stay dense and JSONL lines never interleave.
+    # RLock because verify() funnels through read_all().
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._mu:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def _canonical(obj: object) -> bytes:
@@ -44,6 +57,7 @@ class ReceiptStore:
     """Append-only JSONL receipt file with a hash chain."""
 
     def __init__(self, path: str | os.PathLike[str]):
+        self._mu = threading.RLock()
         self.path = Path(path)
         self.anchor_path = Path(str(path) + ".anchor")
         self.index_path = Path(str(path) + ".index.db")
@@ -117,6 +131,7 @@ class ReceiptStore:
                     last = line.strip()
         return last
 
+    @_locked
     def append(self, *, agent_id: str, task_id: str, action: str,
                tool: str = "", detail: dict | None = None,
                cost_nano: int = 0, policy_version: str = "m0",
@@ -277,6 +292,7 @@ class ReceiptStore:
         return self.append(agent_id=agent_id, task_id=task_id, action=action,
                            tool=tool, detail=detail, outcome="pending")
 
+    @_locked
     def settle(self, seq: int, return_code: int, *, cost_nano: int = 0,
                detail: dict | None = None,
                settler_id: str = "orchestrator") -> dict:
@@ -306,6 +322,7 @@ class ReceiptStore:
                            action="settle", outcome=outcome,
                            cost_nano=cost_nano, detail=detail, settles=seq)
 
+    @_locked
     def read_all(self) -> list[dict]:
         if not self.path.exists():
             return []
@@ -321,6 +338,7 @@ class ReceiptStore:
                                        f"line {lineno} is not JSON: {exc}") from exc
         return receipts
 
+    @_locked
     def verify(self) -> int:
         """Replay the chain. Returns the receipt count, raises on any break."""
         expected_prev = "genesis"

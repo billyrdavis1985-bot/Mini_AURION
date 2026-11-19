@@ -15,6 +15,7 @@ unlabeled or unknown tool is refused, never defaulted to READ.
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 
@@ -41,6 +42,12 @@ class ToolFailed(Exception):
     def __init__(self, seq: int, message: str):
         super().__init__(f"TOOL_FAILED seq={seq}: {message}")
         self.seq = seq
+
+
+# Serializes backend execution with the read-back of the backend's
+# last-call attributes: without it two threads sharing one wrapper
+# could settle a call with the other call's cost or snapshot hash.
+_BACKEND_MU = threading.Lock()
 
 
 class ToolRegistry:
@@ -239,26 +246,27 @@ class ToolWrapper:
         begun = self.receipts.begin(agent_id=self.agent_id,
                                     task_id=self.task_id, action="tool_call",
                                     tool=name, detail={"args": dict(args)})
-        try:
-            result = backend.call(name, args)
-            return_code = 0
-            error = ""
-        except Exception as exc:  # noqa: BLE001 - any backend failure settles failed
-            result = None
-            return_code = 1
-            error = str(exc)
-        reported = getattr(backend, "last_cost_nano", None)
-        if reported is None:
-            actual = estimate_nano
-        else:
-            actual = reported or 0
-        if reservation is not None:
-            self.ledger.settle(reservation, actual)
-        # A backend may name what it read (fetch_url names its
-        # snapshot hash); failures carry no detail, only the code.
-        detail = getattr(backend, "last_receipt_detail", None)
-        if return_code != 0 or not isinstance(detail, dict):
-            detail = None
+        with _BACKEND_MU:
+            try:
+                result = backend.call(name, args)
+                return_code = 0
+                error = ""
+            except Exception as exc:  # noqa: BLE001 - any backend failure settles failed
+                result = None
+                return_code = 1
+                error = str(exc)
+            reported = getattr(backend, "last_cost_nano", None)
+            if reported is None:
+                actual = estimate_nano
+            else:
+                actual = reported or 0
+            if reservation is not None:
+                self.ledger.settle(reservation, actual)
+            # A backend may name what it read (fetch_url names its
+            # snapshot hash); failures carry no detail, only the code.
+            detail = getattr(backend, "last_receipt_detail", None)
+            if return_code != 0 or not isinstance(detail, dict):
+                detail = None
         self.receipts.settle(begun["seq"], return_code, cost_nano=actual,
                              detail=detail)
         if return_code != 0:

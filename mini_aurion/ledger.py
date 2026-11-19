@@ -10,8 +10,10 @@ Overruns are recorded at actual cost with an overrun flag, never silently.
 """
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -23,6 +25,17 @@ class LedgerError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(f"{code}: {message}")
         self.code = code
+
+
+def _locked(method):
+    # One reentrant lock per ledger: sqlite connections are not
+    # thread-safe, and BEGIN IMMEDIATE only serializes processes.
+    # RLock because reserve()/set_caps() funnel through caps().
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._mu:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def _today() -> str:
@@ -37,10 +50,12 @@ class Ledger:
                             ("global_cap_nano", global_cap_nano)):
             if not isinstance(value, int) or value <= 0:
                 raise LedgerError("BAD_CAP", f"{name} must be a positive int")
+        self._mu = threading.RLock()
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path), timeout=10.0,
-                                  isolation_level=None)
+                                  isolation_level=None,
+                                  check_same_thread=False)
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS reservations ("
             " id TEXT PRIMARY KEY, task_id TEXT NOT NULL,"
@@ -96,11 +111,13 @@ class Ledger:
         return cls(ledger_path, task_cap_nano=1, daily_cap_nano=1,
                    global_cap_nano=1)
 
+    @_locked
     def caps(self) -> dict:
         rows = self.db.execute(
             "SELECT name, value_nano FROM caps").fetchall()
         return {name: int(value) for name, value in rows}
 
+    @_locked
     def set_caps(self, *, task=None, daily=None, global_=None) -> dict:
         # The monitor's caps editor. Updates are atomic and immediate:
         # reserve() re-reads this table on every call, so a lowered cap
@@ -118,6 +135,7 @@ class Ledger:
         self.db.commit()
         return self.caps()
 
+    @_locked
     def refund_task(self, task_id: str) -> dict:
         # Release every in-flight reservation for one task. The kill
         # path calls this after the process dies so the next task is
@@ -139,6 +157,7 @@ class Ledger:
         return {"count": len(rows),
                 "released_nano": sum(int(est) for _, est in rows)}
 
+    @_locked
     def close(self) -> None:
         self.db.close()
 
@@ -168,6 +187,7 @@ class Ledger:
             f" WHERE {self._live_where()}").fetchone()
         return int(row[0])
 
+    @_locked
     def reserve(self, task_id: str, worst_case_nano: int,
                 provider: str = "", model: str = "") -> str:
         if not task_id or not isinstance(task_id, str):
@@ -207,6 +227,7 @@ class Ledger:
         self.db.execute("COMMIT")
         return rid
 
+    @_locked
     def settle(self, reservation_id: str, actual_nano: int) -> bool:
         """Settle to actual cost. Returns True if actual exceeded estimate."""
         if not isinstance(actual_nano, int) or actual_nano < 0:
@@ -226,6 +247,7 @@ class Ledger:
         self.db.commit()
         return actual_nano > estimate
 
+    @_locked
     def refund(self, reservation_id: str) -> None:
         row = self.db.execute(
             "SELECT state FROM reservations WHERE id=?",
@@ -246,6 +268,7 @@ class Ledger:
             " GROUP BY provider, model", args).fetchall()
         return {f"{prov}/{mod}": int(total) for prov, mod, total in rows}
 
+    @_locked
     def spend(self, task_id: str) -> dict:
         """Settled + in-flight exposure for one task, in nano-USD."""
         settled = self.db.execute(
@@ -257,6 +280,7 @@ class Ledger:
         return {"settled_nano": int(settled), "inflight_nano": int(inflight),
                 "by_provider": self._by_provider("task_id=?", (task_id,))}
 
+    @_locked
     def totals(self) -> dict:
         settled = self.db.execute(
             "SELECT COALESCE(SUM(actual_nano),0) FROM reservations"
