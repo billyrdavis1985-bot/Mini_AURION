@@ -127,7 +127,8 @@ class _LiveHarness(unittest.TestCase):
         led = Ledger(os.path.join(self.dir, "l.db"), task_cap_nano=BIG,
                      daily_cap_nano=BIG, global_cap_nano=BIG)
         mem = Memory(os.path.join(self.dir, "m.db"), file_root=self.corpus,
-                     receipt_store=rs)
+                     receipt_store=rs,
+                     mechanical_checks=frozenset({"critic"}))
         try:
             reg = ToolRegistry()
             reader = _Corpus(self.corpus)

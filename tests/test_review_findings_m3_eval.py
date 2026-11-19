@@ -61,7 +61,8 @@ class _Harness(unittest.TestCase):
     def orchestrator(self, model, ledger, *, backend=None, tool_est=0,
                      model_est=0) -> Orchestrator:
         memory = Memory(self.base / f"m{len(self._open)}.sqlite3",
-                        file_root=self.tree, receipt_store=self.receipts)
+                        file_root=self.tree, receipt_store=self.receipts,
+                        mechanical_checks=frozenset({"critic"}))
         self._open.append(memory)
         registry = ToolRegistry()
         backend = backend or TreeReader(self.tree)
