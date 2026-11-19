@@ -110,6 +110,15 @@ def _seat_of(model) -> dict:
             "model": getattr(model, "model", "?")}
 
 
+def legs_for(name: str) -> list:
+    """Which legs one invocation runs. Single legs let the operator
+    re-run a flaky leg without redoing the clean one; every attempt
+    keeps its receipts under a -aN variant."""
+    legs = {"serial": [("serial", 1)], "parallel": [("parallel", 2)],
+            "both": [("serial", 1), ("parallel", 2)]}
+    return legs[name]
+
+
 def build_brief(question: str, tree: Path) -> str:
     """Demo brief, assembled exactly like the code-QA loop's: question
     plus the exactness/quote discipline notes plus the tree layout.
@@ -227,6 +236,8 @@ def main(argv=None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--cap-usd", default="3.00")
     parser.add_argument("--task-id", default="b3demo")
+    parser.add_argument("--legs", choices=("serial", "parallel", "both"),
+                        default="both")
     args = parser.parse_args(argv)
     if not args.live:
         return _refuse("live model calls need --live")
@@ -277,7 +288,7 @@ def main(argv=None) -> int:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     legs = {}
-    for tag, workers in (("serial", 1), ("parallel", 2)):
+    for tag, workers in legs_for(args.legs):
         task_id = f"{args.task_id}-{tag}"
         state_dir = out_path.parent / task_id
         leg = run_leg(QUESTION, brief, task_id, tree, state_dir,
@@ -295,8 +306,9 @@ def main(argv=None) -> int:
         "cap_usd": args.cap_usd,
         "legs": legs,
     }
-    serial_wall = legs["serial"]["wall_ms"]
-    parallel_wall = legs["parallel"]["wall_ms"]
+    serial_wall = legs.get("serial", {}).get("wall_ms")
+    parallel_wall = legs.get("parallel", {}).get("wall_ms")
+    report["speedup"] = None
     if serial_wall and parallel_wall:
         report["speedup"] = round(serial_wall / parallel_wall, 2)
         print(f"speedup: {report['speedup']}x "
