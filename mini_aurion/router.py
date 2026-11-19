@@ -23,7 +23,10 @@ from .anthropic import AnthropicConfig, AnthropicModel
 from .google import GoogleConfig, GoogleModel
 from .muse import PROVIDERS, MuseConfig, MuseModel
 
-SEATS = ("specialist", "orchestrator", "verifier")
+# specialist_b is the B3 demo's second specialist: a distinct seat so it
+# gets a distinct model instance (sharing one would serialize the calls
+# whose parallel gain the demo measures).
+SEATS = ("specialist", "specialist_b", "orchestrator", "verifier")
 # Native wire shapes, one config+model pair each. Everything else goes
 # through the OpenAI-compatible family in muse.PROVIDERS.
 NATIVE = {"anthropic": (AnthropicConfig, AnthropicModel),

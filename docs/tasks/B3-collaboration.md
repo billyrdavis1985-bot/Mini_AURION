@@ -58,6 +58,15 @@ sits at decompose-off (F2). Read both before starting.
 
 PRs 1–3 do not need the operator's demo question. PR 4 does.
 
+## Frozen demo question (PR4, operator-approved)
+
+Part 1: Which function refuses unregistered tools, and what receipt does the caller write for the refusal? Cite path:line. Part 2: Which function serializes concurrent spend reservations so caps cannot race? Cite path:line.
+
+Routing: `eval/routing-b3.json` (all meta, `same_provider_ok`). Legs:
+serial at `max_workers=1`, then parallel at `max_workers=2`, same
+question, tree, contract, and caps. Wall-clock comes from receipts.
+Runner: `eval/demo_b3.py`; contract `eval/contract-b3-demo-v1.json`.
+
 ## Demo (closes the milestone)
 
 - One multi-part question (decision 3). The brief: per-part
