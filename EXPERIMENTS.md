@@ -265,3 +265,39 @@ kept (OPERATIONS section 7).
   work if they block: B2 ran eleven exploratory briefs against
   code with four known findings open, which is why VISION.md rule
   6 now says blocking fixes merge before live use.
+
+## F14. Parallel collaboration: measured gain, verified-only brief
+
+- **Tried:** B3 milestone (#94 verified-note writes, #95 parallel
+  delegation with locking, #96 verified-only synthesis, #97 demo
+  runner, #98 loop-parity brief notes, #99 single-leg reruns): one
+  frozen two-part code question over the frozen tree, run serial
+  then parallel with the same contract, routing, and caps
+  (`docs/demos/B3.md`).
+- **Result:** recorded serial leg 27 s wall / 26 s work, parallel
+  21 s wall / 33 s work: 1.29x speedup, with work exceeding wall on
+  the parallel leg, which is the overlap itself. Both legs filed
+  2/2 verified notes and briefed from verified notes only; both are
+  partial via the verified-only fallback (see below), which is the
+  honest demo shape, as in B2.
+- **Cost:** recorded legs $0.1481 (serial $0.0676, parallel
+  $0.0805); full path $0.6018 over 9 leg-attempts. The parallel leg
+  cost more: two specialists each orient where the serial leg's
+  second investigation reuses warmer context. Gain here is time,
+  not spend.
+- **Variance, all caught by the loop:** tool-budget wandering (ran
+  on a runner missing the loop's brief notes before #98), a
+  no-evidence specialist answer failed twice then honestly
+  escalated, and one 3-way planner split of the 2-part question.
+  No unverified text reached any brief in any attempt; every
+  attempt's receipts survive under `-aN` variants.
+- **Lesson (loop):** the synthesis call never sees the JSON reply
+  shape (it lives only in the specialists' system prompt), so live
+  syntheses arrive as prose, fail NO_EVIDENCE, and fall back. That
+  is the deeper cause of H2's "fallback is the likely path", now a
+  backlog row. Fixing it is a prompt change with its own gate, not
+  transcript work.
+- **Lesson (pipeline):** the demo brief must be assembled by the
+  same code path as the eval loop's, not retyped beside it (#98);
+  and single-leg reruns (#99) beat rerunning both legs when
+  variance strikes one.

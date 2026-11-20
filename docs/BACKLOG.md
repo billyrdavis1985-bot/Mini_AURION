@@ -23,6 +23,7 @@ milestone needs it (VISION.md rule 4).
 | `fetch_url` caps the **raw** body at 256 KB; github.com alone exceeded it in #79's live check. Most modern pages will. Cap the raw read higher (e.g. 2 MB) and cap the **extracted text** at what the context can carry. | #79 live evidence | before the B2 demo (or the demo measures how many fetches refuse) |
 | `FetchBackend(allow_private=True)` disables D5 entirely; it exists for loopback tests. The research runner should assert it is off, so no future flag or config path can enable it live. | B2 review (#79) | when next touched |
 | Model cost rides on shared mutable state (`last_cost_nano` read after `complete()`, wrapper `last_*` reads after `backend.call`). Parallel sharing is correct today only via the pair-locks; return cost in the reply dict so spend attribution cannot depend on locking discipline. | B3 PR2 | when the model protocol is next touched |
+| The synthesis call never sees the JSON reply shape (it lives only in the specialists' system prompt), so live syntheses arrive as prose, fail NO_EVIDENCE, and fall back; every recorded B3 leg fell back. Instruct the shape in SYNTH_FORMAT or a synth system prompt. Prompt change: needs the section 7 gate, and re-baselines code-QA. | B3 demo (F14) | when the synth prompt is next touched |
 
 ## Closed
 
