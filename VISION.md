@@ -6,9 +6,17 @@ systems can be built on evidence instead of hope:
 
 - **AURION** (Agentic Unified Reasoning Intelligence Operation Network):
   an orchestrated, tiered, multi-LLM research and automation system.
-- **PRAXIS**: a different architecture that will consume the same
-  findings. Its shape is not yet documented here; until it is, findings
-  are written so that what was learned about *agents and models* is kept
+- **PRAXIS** (Probabilistic Risk & Agentic eXecution Investment
+  System): a financial research platform asking whether information
+  genuinely available at a point in time has reproducible predictive
+  value about future returns or volatility beyond statistical
+  baselines. Its architecture spans probabilistic market analysis,
+  ML-vs-baseline evaluation, risk intelligence, and reproducibility
+  validation (leakage, false-discovery, and miscalibration checks),
+  trending toward governed agentic research coordination with
+  human-supervised decisions. Findings about calibration,
+  probabilistic claims, verification, and governed autonomy tag for
+  PRAXIS; findings keep what was learned about *agents and models*
   separate from what was learned about *this hub-and-spoke pipeline*.
 
 The research the full systems will do: marketing and trade predictive
@@ -90,5 +98,5 @@ result is interesting.
 | --- | --- | --- |
 | ADR-003: how predictive and probabilistic claims are verified (provenance now, calibration over time), and what the verifier seat checks beyond relevance | reviewer drafts, operator approves | **drafted** (`docs/adr/003-research-verification.md`); approved by merging it |
 | B2's first real research question, in the operator's own domain | operator | before B2 PR 5 (the demo); PRs 1 to 4 do not need it (`docs/tasks/B2-research.md`) |
-| PRAXIS: a one-paragraph description of its architecture, so findings can be tagged for it | operator | before B3 |
+| PRAXIS: a one-paragraph description of its architecture, so findings can be tagged for it | operator | **done** (paragraph in intro; RIP confirmed a separate project) |
 | A local model strong enough to investigate, or local stays a $0 support seat (F11) | operator | no deadline; DeepSeek is the cheap investigation seat meanwhile |
