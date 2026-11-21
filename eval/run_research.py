@@ -181,7 +181,8 @@ def run_mode(args, head: str) -> int:
         verifier_model = router.model_for("verifier")
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
                             stage="experimental", task_id=task_id,
-                            agent_id="spec", scope=contract)
+                            agent_id="spec", scope=contract,
+                            state_dir=state_dir)
         spec = Specialist(
             "spec", spec_model, tools,
             max_model_calls=contract.max_models,

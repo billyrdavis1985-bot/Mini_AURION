@@ -8,7 +8,7 @@ milestone needs it (VISION.md rule 4).
 | Item | Source | Scheduled in |
 | --- | --- | --- |
 | Dead-man's switch does not exist (Monitor flags receipt-stale tasks as STALE; that is the hook, not the switch) | OPERATIONS section 4 `[kernel]` | M7 |
-| Receipt store is writable by the agent process | OPERATIONS section 5 `[kernel]` | M7 |
+| Receipt store: code-level WRITE confinement landed (STORE_PROTECTED denials, all runners pass their state dir); OS-level separation (broker UID/service) still open | M7 PR2 + OPERATIONS section 5 | broker future |
 | Memory module is never written by any agent in the loop | review 2026-11-12 | B3 |
 | Planner decomposition off; retest on multi-part tasks only | EXPERIMENTS F2 | B2/B3 |
 | Per-call spend reservation sized from the brief, not the actual messages. Matters more since F8: the verifier seat is most of the cost, and B2's fetched pages make contexts long. | PR #18 note; B1 review | B2 |

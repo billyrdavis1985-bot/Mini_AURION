@@ -15,6 +15,7 @@ unlabeled or unknown tool is refused, never defaulted to READ.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -99,7 +100,8 @@ class ToolRegistry:
 class ToolWrapper:
     def __init__(self, registry: ToolRegistry, *, receipts: ReceiptStore,
                  ledger, stage: str, task_id: str, agent_id: str,
-                 scope: TaskContract | None = None):
+                 scope: TaskContract | None = None,
+                 state_dir: str | os.PathLike | None = None):
         self.registry = registry
         self.receipts = receipts
         self.ledger = ledger
@@ -107,6 +109,11 @@ class ToolWrapper:
         self.task_id = task_id
         self.agent_id = agent_id
         self.scope = scope
+        # The task's store dir (receipts, ledger, memory, proc): WRITE
+        # tools can never address it. Runners pass this; None leaves
+        # the gate off for old callers (documented, not silent).
+        self._state_dir = os.path.normcase(os.path.abspath(state_dir)) \
+            if state_dir is not None else None
         self._results: dict = {}
 
     def approvals_path(self):
@@ -189,6 +196,27 @@ class ToolWrapper:
                     outcome="denied")
                 raise ToolDenied("SCOPE_EXCLUDED",
                                  f"{name}: {reason}")
+        # Store confinement: a WRITE tool names its target "path" (the
+        # same convention the scope gate uses), and that target can
+        # never be the store dir agents are judged by. abspath covers
+        # absolute and CWD-relative spellings; a symlink escape would
+        # need a planted link, and planting it is itself a denied
+        # write under this same dir.
+        if action_class == "WRITE" and self._state_dir is not None \
+                and isinstance(args.get("path"), str):
+            target = os.path.normcase(os.path.abspath(args["path"]))
+            if target == self._state_dir or target.startswith(
+                    self._state_dir + os.sep):
+                reason = (f"STORE_PROTECTED: {args['path'][:100]} is"
+                          " inside the task's store dir; agent tools"
+                          " never write the receipts, ledger, memory,"
+                          " or proc they are judged by")
+                self.receipts.append(
+                    agent_id=self.agent_id, task_id=self.task_id,
+                    action="denied", tool=name,
+                    detail={"class": action_class, "reason": reason},
+                    outcome="denied")
+                raise ToolDenied("STORE_PROTECTED", f"{name}: {reason}")
         verdict, reason = policy.decide(self.stage, action_class,
                                         approved=approved,
                                         allowlisted=allowlisted)

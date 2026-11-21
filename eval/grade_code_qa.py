@@ -423,7 +423,8 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
         contract = replace(template, goal=brief)
         tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
                             stage="experimental", task_id=task_id,
-                            agent_id="spec", scope=contract)
+                            agent_id="spec", scope=contract,
+                            state_dir=state_dir)
         spec = Specialist("spec", spec_model, tools,
                           model_estimate_nano=estimate,
                           investigator_prompt=SYSTEM_PROMPT)
