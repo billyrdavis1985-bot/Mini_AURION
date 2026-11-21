@@ -36,7 +36,7 @@ from mini_aurion.muse import (MuseConfig, MuseError, MuseModel,  # noqa: E402
                                  SYSTEM_PROMPT)
 from mini_aurion.contract import load_contract, scope_denials  # noqa: E402
 from mini_aurion.orchestrator import Orchestrator  # noqa: E402
-from mini_aurion.receipts import ReceiptStore  # noqa: E402
+from mini_aurion.receipts import ReceiptError, ReceiptStore  # noqa: E402
 from mini_aurion.specialist import Specialist  # noqa: E402
 from mini_aurion.tools import ToolRegistry, ToolWrapper  # noqa: E402
 
@@ -463,6 +463,131 @@ def run_live(case: dict, task_id: str, tree: Path, state_dir: Path,
         memory.close()
 
 
+class ResumeRefused(Exception):
+    pass
+
+
+def resume_live(state_dir: Path, tree: Path, template, cases: list,
+                cap_nano: int, spec_model=None, orc_model=None) -> dict:
+    """Continue one interrupted task in its own state dir: same task
+    id, same receipts, same ledger and memory. The contract is the
+    frozen template re-instantiated with the checkpoint's goal, so a
+    template edited between kill and resume refuses on hash mismatch.
+    Stale 'reserved' rows from the kill are NOT auto-refunded: the
+    call may have completed server-side, so the worst case stays held
+    (the monitor kill path refunds explicitly). Raises ResumeRefused
+    before any model call when there is nothing valid to resume."""
+    state_dir = Path(state_dir)
+    proc_path = state_dir / "proc.json"
+    try:
+        proc = json.loads(proc_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ResumeRefused(
+            f"cannot read {proc_path}: {exc}") from exc
+    task_id = proc.get("task_id", "")
+    ledger_path = proc.get("ledger", "")
+    if not task_id or not isinstance(task_id, str):
+        raise ResumeRefused(f"{proc_path} names no task")
+    if not isinstance(ledger_path, str) or not Path(ledger_path).exists():
+        raise ResumeRefused(f"ledger is gone: {ledger_path}")
+    receipts_path = state_dir / "receipts.jsonl"
+    memory_path = state_dir / "memory.sqlite3"
+    for path in (receipts_path, memory_path):
+        if not path.exists():
+            raise ResumeRefused(f"state is missing {path.name}")
+    receipts = ReceiptStore(receipts_path)
+    try:
+        receipts.verify()
+    except ReceiptError as exc:
+        raise ResumeRefused(f"chain broken: {exc}") from exc
+    checkpoints = [r for r in receipts.read_all()
+                   if r["task_id"] == task_id
+                   and r["action"] == "checkpoint"]
+    if not checkpoints:
+        raise ResumeRefused("no checkpoint: nothing to resume")
+    goal = checkpoints[-1]["detail"].get("goal", "")
+    if not goal or not isinstance(goal, str):
+        raise ResumeRefused("checkpoint has no goal")
+    contract = replace(template, goal=goal)
+    match = re.fullmatch(r"(.+)-r\d+", task_id)
+    case = next((c for c in cases if c["id"] == (match.group(1) if match
+                                                else task_id)), None)
+    if case is None:
+        raise ResumeRefused(f"{task_id} names no known case")
+    ledger = Ledger(ledger_path, task_cap_nano=cap_nano,
+                    daily_cap_nano=cap_nano, global_cap_nano=cap_nano)
+    memory = Memory(memory_path, file_root=tree, receipt_store=receipts,
+                    mechanical_checks=frozenset({"critic"}))
+    try:
+        registry = ToolRegistry()
+        reader = TreeReader(tree)
+        registry.register(
+            "read_file", "READ", 0, reader,
+            description="Read a file from the repo tree. Cite path:line.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"]})
+        registry.register(
+            "list_dir", "READ", 0, reader,
+            description="List a directory in the repo tree. Start with"
+                        " path \".\" (the tree root, never \"/\"), then read"
+                        " the file most likely to hold the answer.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}}})
+        if spec_model is None and orc_model is None:
+            spec_model = orc_model = MuseModel(MuseConfig.from_env())
+        elif spec_model is None:
+            spec_model = orc_model
+        elif orc_model is None:
+            orc_model = spec_model
+        estimate = spec_model.worst_case_nano(
+            [{"role": "brief", "text": goal}])
+        orc_estimate = orc_model.worst_case_nano(
+            [{"role": "brief", "text": goal}])
+        tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
+                            stage="experimental", task_id=task_id,
+                            agent_id="spec", scope=contract,
+                            state_dir=state_dir)
+        spec = Specialist("spec", spec_model, tools,
+                          model_estimate_nano=estimate,
+                          investigator_prompt=SYSTEM_PROMPT)
+
+        def grade_check(candidate):
+            ok, _ = grade(case, {"status": candidate["status"],
+                                 "text": candidate["text"],
+                                 "evidence": candidate["evidence"]}, tree)
+            return ok
+
+        orc = Orchestrator(
+            "orc", orc_model, {"spec": spec},
+            Critic("critic", memory, receipts=receipts),
+            receipts=receipts, ledger=ledger,
+            model_estimate_nano=orc_estimate, contract=contract,
+            message_budget=contract.messages,
+            planner_prompt=PLANNER_PROMPT,
+            judge_prompt=RELEVANCE_PROMPT,
+            routing_hash=proc.get("routing"),
+            acceptance=(("A1", grade_check),
+                        ("A2", lambda cand: scope_denials(receipts) == 0)))
+        seats = {"specialist": _seat_of(spec_model),
+                 "orchestrator": _seat_of(orc_model)}
+        _write_proc(state_dir, task_id, ledger, proc.get("routing"),
+                    status="running", seats=seats)
+        result = orc.resume_task(task_id)
+        if result.get("status") == "refused":
+            proc_path.write_text(json.dumps(proc, indent=1),
+                                 encoding="utf-8")
+            raise ResumeRefused(result["reason"])
+        _write_proc(state_dir, task_id, ledger, proc.get("routing"),
+                    status="ended", end_status=result["status"], seats=seats)
+        result["spent_nano"] = ledger.spend(task_id)["settled_nano"]
+        result["receipts_path"] = str(receipts_path)
+        return result
+    finally:
+        memory.close()
+        ledger.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
@@ -471,7 +596,12 @@ def main(argv=None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--cap-usd", default=None)
     parser.add_argument("--cases", default=None)
+    parser.add_argument("--resume-from", default=None)
     args = parser.parse_args(argv)
+    if args.resume_from and args.cases:
+        print("refusing to run: --resume-from runs the recorded task,"
+              " not --cases")
+        return 2
     if not args.live:
         print("refusing to run: live model calls need --live")
         return 2
@@ -518,6 +648,32 @@ def main(argv=None) -> int:
         return 2
     print(f"runner: {head}")
     report_head = head
+    if args.resume_from:
+        try:
+            result = resume_live(Path(args.resume_from), tree, template,
+                                 cases, cap_nano)
+        except ResumeRefused as exc:
+            print(f"refusing to resume: {exc}")
+            return 2
+        report = {"resumed": True, "runner_commit": report_head,
+                  "task_id": result["task_id"], "status": result["status"],
+                  "replayed": result.get("replayed", []),
+                  "re_delegated": result.get("re_delegated", []),
+                  "text": result.get("text", "")[:1000],
+                  "spent_nano": result.get("spent_nano", 0),
+                  "receipts": result.get("receipts_path", ""),
+                  "elapsed_s": round(time.perf_counter() - eval_started, 1)}
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(report, indent=1))
+        print(f"resumed {result['task_id']}: {result['status']} "
+              f"(replayed {report['replayed']}, "
+              f"re-delegated {report['re_delegated']})")
+        print(f"wrote {out_path}")
+        spent = report["spent_nano"]
+        print(f"resume spend: {spent} nanoUSD"
+              f" ({spent / NANO_PER_USD:.8f} USD)")
+        print(f"eval time: {time.perf_counter() - eval_started:.1f} s")
+        return 0
     out_path.parent.mkdir(parents=True, exist_ok=True)
     eval_dir = out_path.parent / "code-qa-v1"
     eval_dir.mkdir(parents=True, exist_ok=True)

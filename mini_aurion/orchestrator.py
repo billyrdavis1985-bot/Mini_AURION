@@ -19,6 +19,7 @@ from .contract import TaskContract, contract_hash, render_for_planner
 from .ledger import LedgerError
 from .memory import MemoryError
 from .messages import AgentMessage
+from .receipts import ReceiptError
 from .research import (SUPPORT_PROMPT, SUPPORT_REASON_PROMPT,
                        parse_research_reply, parse_support_verdict,
                        register_forecasts)
@@ -82,6 +83,10 @@ class Orchestrator:
         self.max_workers = max_workers
         self._mu = threading.Lock()
         self.messages_used = 0
+        self._ckpt_plan: list = []
+        self._ckpt_settled: dict = {}
+        self._ckpt_refused: list = []
+        self._ckpt_goal = ""
 
     def _messages_spent(self) -> int:
         with self._mu:
@@ -134,7 +139,10 @@ class Orchestrator:
 
     def run(self, task_id: str, question: str) -> dict:
         self.messages_used = 0
-        self._run_started = time.perf_counter()
+        self._ckpt_plan = []
+        self._ckpt_settled = {}
+        self._ckpt_refused = []
+        self._ckpt_goal = question
         start_detail: dict = {"question": question[:500]}
         if self.contract is not None:
             start_detail["contract"] = contract_hash(self.contract)
@@ -143,8 +151,16 @@ class Orchestrator:
         self.receipts.append(agent_id=self.agent_id, task_id=task_id,
                              action="task_start", detail=start_detail,
                              outcome="ok")
+        return self._guarded(
+            task_id, lambda: self._run_inner(task_id, question))
+
+    def _guarded(self, task_id: str, fn) -> dict:
+        """Run to task_end even when the body raises. Fresh runs and
+        resumes share the guard: a crash mid-resume ends the chain
+        honestly instead of leaving a second open wound."""
+        self._run_started = time.perf_counter()
         try:
-            return self._run_inner(task_id, question)
+            return fn()
         except Exception as exc:  # noqa: BLE001 - every task ends with task_end
             self.receipts.append(
                 agent_id=self.agent_id, task_id=task_id, action="task_end",
@@ -200,7 +216,21 @@ class Orchestrator:
                                  if isinstance(sub, dict)],
                     "refused": [f["subtask"] for f in refused]},
             outcome="ok" if subtasks else "denied")
-        findings: list[dict] = refused
+        self._ckpt_plan = [dict(s) for s in subtasks]
+        self._ckpt_settled = {}
+        self._ckpt_refused = [
+            {"subtask": f["subtask"], "reason": f["reason"]}
+            for f in refused]
+        self._checkpoint(task_id, "plan")
+        fresh, unattempted = self._run_subtasks(task_id, question, subtasks)
+        return self._synthesize_and_finish(
+            task_id, question, refused + fresh, unattempted)
+
+    def _run_subtasks(self, task_id: str, question: str,
+                      subtasks: list) -> tuple[list, list]:
+        """Delegate every subtask, serially or on threads. Fresh runs
+        pass the validated plan; resumes pass only what never settled."""
+        findings: list[dict] = []
         unattempted: list[str] = []
         if self.max_workers == 1:
             for sub in subtasks:
@@ -225,6 +255,10 @@ class Orchestrator:
                 findings.extend(pool.map(
                     lambda sub: self._delegate(task_id, sub, question),
                     runnable))
+        return findings, unattempted
+
+    def _synthesize_and_finish(self, task_id: str, question: str,
+                               findings: list, unattempted: list) -> dict:
         accepted = [f for f in findings if f["status"] == "accepted"]
         synth_note = ""
         if not accepted:
@@ -417,14 +451,12 @@ class Orchestrator:
         self._record_check(task_id, sub["id"], message, check, attempt=1)
         if check["verdict"] == "pass":
             if self._judge(task_id, question, sub, message):
-                return {"subtask": sub["id"], "status": "flagged",
-                        "message": message}
+                return self._settle(task_id, sub, "flagged", message)
             filed = self.critic.file_note(
                 task_id, message.sender, message.claim,
                 message.evidence)
-            return {"subtask": sub["id"], "status": "accepted",
-                    "message": message,
-                    "note_id": (filed or {}).get("id")}
+            return self._settle(task_id, sub, "accepted", message,
+                                note_id=(filed or {}).get("id"))
         if check["verdict"] == "escalated":
             return {"subtask": sub["id"], "status": "escalated",
                     "message": message}
@@ -438,14 +470,147 @@ class Orchestrator:
         self._record_check(task_id, sub["id"], retry, recheck, attempt=2)
         if recheck["verdict"] == "pass":
             if self._judge(task_id, question, sub, retry):
-                return {"subtask": sub["id"], "status": "flagged",
-                        "message": retry}
+                return self._settle(task_id, sub, "flagged", retry)
             filed = self.critic.file_note(
                 task_id, retry.sender, retry.claim, retry.evidence)
-            return {"subtask": sub["id"], "status": "accepted",
-                    "message": retry,
-                    "note_id": (filed or {}).get("id")}
+            return self._settle(task_id, sub, "accepted", retry,
+                                note_id=(filed or {}).get("id"))
         return {"subtask": sub["id"], "status": "escalated", "message": retry}
+
+    def _settle(self, task_id: str, sub: dict, status: str,
+                message, note_id=None) -> dict:
+        """Record a terminal verdict and checkpoint it. Accepted and
+        flagged both settle: a verdict either way. Escalations settle
+        nothing — on resume they are retried, not replayed."""
+        with self._mu:
+            self._ckpt_settled[sub["id"]] = {
+                "subtask": sub["id"], "status": status,
+                "sender": message.sender, "claim": message.claim,
+                "evidence": list(message.evidence), "note_id": note_id}
+        self._checkpoint(task_id, "progress")
+        finding: dict = {"subtask": sub["id"], "status": status,
+                         "message": message}
+        if status == "accepted":
+            finding["note_id"] = note_id
+        return finding
+
+    def _checkpoint(self, task_id: str, phase: str) -> None:
+        """Receipt the resumable state: the validated plan, every
+        settled subtask, and the counters a resume continues. Only
+        under a contract: without one there is nothing to check the
+        resume against. Written after the plan lands and after every
+        settled finding, on the serial and threaded paths alike;
+        resume unions every checkpoint, so thread write order cannot
+        lose a verdict."""
+        if self.contract is None:
+            return
+        with self._mu:
+            plan = [dict(s) for s in self._ckpt_plan]
+            settled = [dict(self._ckpt_settled[k])
+                       for k in sorted(self._ckpt_settled)]
+            refused = [dict(r) for r in self._ckpt_refused]
+            used = self.messages_used
+            goal = self._ckpt_goal
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="checkpoint",
+            detail={"phase": phase, "plan": plan, "settled": settled,
+                    "refused": refused, "goal": goal,
+                    "contract": contract_hash(self.contract),
+                    "messages_used": used},
+            outcome="ok")
+
+    def resume_task(self, task_id: str) -> dict:
+        """Continue an interrupted task on its own chain: same task
+        id, same receipts, same ledger and memory. The recorded plan
+        is reused, never re-planned; only subtasks with no settled
+        verdict are re-delegated, so completed work is never
+        re-spent. Spend continues (same ledger) and the message
+        count continues from the checkpoint. Refusals return status
+        refused and append nothing: a refusal is an operator error,
+        not a task event."""
+        try:
+            self.receipts.verify()
+        except ReceiptError as exc:
+            return {"task_id": task_id, "status": "refused",
+                    "reason": f"chain broken: {exc}"}
+        if self.contract is None:
+            return {"task_id": task_id, "status": "refused",
+                    "reason": "resume needs a contract"}
+        prior = [r for r in self.receipts.read_all()
+                 if r["task_id"] == task_id]
+        if any(r["action"] == "task_end" for r in prior):
+            return {"task_id": task_id, "status": "refused",
+                    "reason": "task already ended"}
+        checkpoints = [r for r in prior if r["action"] == "checkpoint"]
+        if not checkpoints:
+            return {"task_id": task_id, "status": "refused",
+                    "reason": "no checkpoint: nothing to resume"}
+        latest = checkpoints[-1]["detail"]
+        if latest.get("contract") != contract_hash(self.contract):
+            return {"task_id": task_id, "status": "refused",
+                    "reason": "contract changed since the checkpoint"}
+        goal = latest.get("goal", "")
+        if not goal or not isinstance(goal, str):
+            return {"task_id": task_id, "status": "refused",
+                    "reason": "checkpoint has no goal"}
+        settled: dict = {}
+        for point in checkpoints:
+            for record in point["detail"].get("settled", []):
+                settled[record["subtask"]] = record
+        plan = latest.get("plan", [])
+        self._ckpt_plan = [dict(s) for s in plan]
+        self._ckpt_settled = {k: dict(v) for k, v in settled.items()}
+        self._ckpt_refused = [dict(r) for r in latest.get("refused", [])]
+        self._ckpt_goal = goal
+        self.messages_used = latest.get("messages_used", 0)
+        replayed = []
+        for sub in plan:
+            record = settled.get(sub.get("id", "?"))
+            if record is not None:
+                replayed.append(self._replay(task_id, record))
+        unfinished = [s for s in plan if s.get("id", "?") not in settled]
+        refused = []
+        for entry in self._ckpt_refused:
+            refused.append(
+                {"subtask": entry["subtask"], "status": "refused",
+                 "reason": entry.get("reason", ""),
+                 "message": AgentMessage(
+                     sender=self.agent_id, task_id=task_id,
+                     claim=f"refused: {entry.get('reason', '')}",
+                     cost_nano=0, escalated=True)})
+        self.receipts.append(
+            agent_id=self.agent_id, task_id=task_id, action="resume",
+            detail={"from_checkpoint": checkpoints[-1]["seq"],
+                    "replayed": [f["subtask"] for f in replayed],
+                    "re_delegating": [s.get("id", "?") for s in unfinished]},
+            outcome="ok")
+
+        def _continue():
+            fresh, unattempted = self._run_subtasks(
+                task_id, goal, unfinished)
+            return self._synthesize_and_finish(
+                task_id, goal, refused + replayed + fresh, unattempted)
+
+        result = self._guarded(task_id, _continue)
+        result["resumed"] = True
+        result["replayed"] = [f["subtask"] for f in replayed]
+        result["re_delegated"] = [s.get("id", "?") for s in unfinished]
+        return result
+
+    def _replay(self, task_id: str, record: dict) -> dict:
+        """Rebuild a settled finding from its checkpoint record. The
+        note itself is re-read live at synthesis, fail-closed, exactly
+        as on a fresh run."""
+        message = AgentMessage(
+            sender=record.get("sender", "?"), task_id=task_id,
+            claim=record.get("claim", ""),
+            evidence=[dict(e) for e in record.get("evidence", [])],
+            cost_nano=0)
+        finding: dict = {"subtask": record["subtask"],
+                         "status": record["status"], "message": message}
+        if record.get("note_id"):
+            finding["note_id"] = record["note_id"]
+        return finding
 
     def _judge(self, task_id: str, question: str, sub: dict,
                message) -> bool:
