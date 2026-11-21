@@ -87,7 +87,9 @@ class ConfinementTests(unittest.TestCase):
 
     def test_cwd_relative_spelling_denied(self):
         wrapper = self._wrapper()
-        rel = os.path.relpath(os.path.join(self.state, "r.jsonl"))
+        os.chdir(self.state)
+        rel = os.path.relpath(os.path.join(self.state, "r.jsonl"),
+                              os.getcwd())
         with self.assertRaises(ToolDenied):
             wrapper.call("write_file", {"path": rel})
         self.assertEqual(self.backend.calls, [])
