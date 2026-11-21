@@ -12,9 +12,12 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from mini_aurion.ledger import Ledger, LedgerError  # noqa: E402
-from mini_aurion.monitor import (_pid_alive, decide_approval, find_tasks,  # noqa: E402
-                                 kill_task, pending_approvals, serve,
-                                 task_status)
+from mini_aurion.monitor import (_pid_alive, check_heartbeat,  # noqa: E402
+                                 decide_approval, find_tasks,
+                                 heartbeat_path, kill_task,
+                                 pending_approvals, receipt_age_seconds,
+                                 serve, task_status, write_heartbeat)
+from mini_aurion.monitor import main as monitor_main  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 
 CAPS = {"task_cap_nano": 10_000_000_000, "daily_cap_nano": 50_000_000_000,
@@ -219,6 +222,82 @@ class MonitorTests(unittest.TestCase):
         self._write_proc()
         with self.assertRaises(KeyError):
             kill_task(self.root, "task-a")
+
+    def test_kill_refuses_when_receipts_show_task_end(self):
+        # The pid-reuse window: proc says running with a live pid,
+        # but the task is over. The sleeper must survive the call.
+        sleeper = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            rid = self.ledger.reserve("task-a", 4_000)
+            self.proc["pid"] = sleeper.pid
+            self._write_proc()
+            ReceiptStore(self.receipts).append(
+                agent_id="orc", task_id="task-a", action="task_end",
+                detail={"status": "complete"}, outcome="ok")
+            with self.assertRaises(KeyError) as ctx:
+                kill_task(self.root, "task-a")
+            self.assertIn("already ended", str(ctx.exception))
+            self.assertIsNone(sleeper.poll())
+            rows = ReceiptStore(self.receipts).read_all()
+            self.assertEqual([r for r in rows if r["action"] == "kill"],
+                             [])
+            self.assertEqual(self.ledger.spend("task-a")["inflight_nano"],
+                             4_000)
+            self.ledger.settle(rid, 1)
+        finally:
+            if sleeper.poll() is None:
+                sleeper.kill()
+                sleeper.wait()
+
+    def test_startup_beats_before_first_request(self):
+        self._serve()
+        beat = json.loads(heartbeat_path(self.root).read_text(
+            encoding="utf-8"))
+        self.assertEqual(beat["pid"], os.getpid())
+
+    def test_served_request_refreshes_heartbeat(self):
+        base = self._serve()
+        beat_path = heartbeat_path(self.root)
+        beat_path.write_text(json.dumps({"ts": "2020-01-01T00:00:00Z",
+                                         "pid": 1}), encoding="utf-8")
+        _http_get(base + "/")
+        beat = json.loads(beat_path.read_text(encoding="utf-8"))
+        self.assertEqual(beat["pid"], os.getpid())
+        verdict = check_heartbeat(self.root)
+        self.assertTrue(verdict["alive"])
+        self.assertLess(verdict["age_seconds"], 60)
+
+    def test_check_passes_on_fresh_heartbeat(self):
+        write_heartbeat(self.root)
+        self.assertEqual(monitor_main(["--root", self.root, "--check"]), 0)
+
+    def test_check_pages_on_missing_heartbeat(self):
+        self.assertEqual(monitor_main(["--root", self.root, "--check"]), 1)
+
+    def test_check_pages_on_stale_but_honors_interval(self):
+        heartbeat_path(self.root).write_text(
+            json.dumps({"ts": "2020-01-01T00:00:00Z", "pid": 1}),
+            encoding="utf-8")
+        self.assertEqual(monitor_main(["--root", self.root, "--check"]), 1)
+        self.assertEqual(monitor_main(["--root", self.root, "--check",
+                                       "--interval", "999999999"]), 0)
+
+    def test_check_pages_on_corrupt_heartbeat(self):
+        heartbeat_path(self.root).write_text("not json{",
+                                             encoding="utf-8")
+        self.assertEqual(monitor_main(["--root", self.root, "--check"]), 1)
+
+    def test_check_refuses_bad_interval(self):
+        self.assertEqual(monitor_main(["--root", self.root, "--check",
+                                       "--interval", "0"]), 2)
+
+    def test_receipt_age_reads_utc_stamps_as_utc(self):
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                              time.gmtime(time.time() - 600))
+        age = receipt_age_seconds({"ts": stamp})
+        self.assertGreater(age, 590)
+        self.assertLess(age, 610)
 
     def test_dead_pid_shows_died_not_running(self):
         self.proc["pid"] = 2**30 + 7  # no such process
