@@ -9,9 +9,18 @@ is wedged inside a model call.
 Usage:
     python -m mini_aurion.monitor --root eval/tiers-smoke --port 8787
 then open http://127.0.0.1:8787/ in a browser.
+
+Dead-man's switch: every served request (and startup) beats a
+heartbeat file under the root; `python -m mini_aurion.monitor
+--root eval/tiers-smoke --check` exits nonzero unless the beat is
+fresh. Run it during live work with the page open (it refreshes
+every 5s); silence then means the monitor is down or unreachable.
+A dead machine cannot page — full coverage wants the check running
+elsewhere.
 """
 from __future__ import annotations
 
+import calendar
 import hmac
 import html
 import json
@@ -30,6 +39,8 @@ from .receipts import ReceiptStore
 
 STALE_SECONDS = 300
 KILL_WAIT_SECONDS = 5
+HEARTBEAT_NAME = "monitor-heartbeat.json"
+HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 def _utcnow() -> str:
@@ -140,7 +151,63 @@ def receipt_age_seconds(row: dict | None) -> float | None:
         stamp = time.strptime(row["ts"], "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
         return None
-    return time.time() - time.mktime(stamp)
+    # timegm, not mktime: the stamp is UTC (note the Z), and mktime
+    # reads it as local time — every age west of Greenwich came out
+    # hours negative, and STALE needed 5h of silence to trip.
+    return time.time() - calendar.timegm(stamp)
+
+
+def heartbeat_path(root: Path) -> Path:
+    return Path(root) / HEARTBEAT_NAME
+
+
+def write_heartbeat(root: Path) -> None:
+    """Beat: this monitor served at this time, as this pid. Atomic
+    replace so the check never reads a torn file. Best-effort by
+    contract — callers swallow OSError so a heartbeat never breaks
+    serving."""
+    beat = json.dumps({"ts": _utcnow(), "pid": os.getpid()},
+                      sort_keys=True).encode("utf-8")
+    path = heartbeat_path(root)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as fh:
+        fh.write(beat)
+    os.replace(tmp, path)
+
+
+def read_heartbeat(root: Path) -> dict | None:
+    """The last beat, or None when missing, corrupt, or undated.
+    Corrupt reads as missing: either way the monitor is not
+    demonstrably alive."""
+    try:
+        beat = json.loads(heartbeat_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(beat, dict) or not beat.get("ts"):
+        return None
+    return beat
+
+
+def check_heartbeat(root: Path,
+                    interval_seconds: int = HEARTBEAT_INTERVAL_SECONDS
+                    ) -> dict:
+    """Dead-man's verdict. Silence is the alert: missing, corrupt,
+    or older than the interval all read dead."""
+    beat = read_heartbeat(root)
+    if beat is None:
+        return {"alive": False, "age_seconds": None, "pid": None,
+                "reason": "no heartbeat"}
+    age = receipt_age_seconds(beat)
+    if age is None:
+        return {"alive": False, "age_seconds": None,
+                "pid": beat.get("pid"), "reason": "heartbeat undated"}
+    if age > interval_seconds:
+        return {"alive": False, "age_seconds": age,
+                "pid": beat.get("pid"),
+                "reason": f"heartbeat is {age:.0f}s old"
+                          f" (interval {interval_seconds}s)"}
+    return {"alive": True, "age_seconds": age, "pid": beat.get("pid"),
+            "reason": "heartbeat is fresh"}
 
 
 def task_spend(proc: dict) -> dict:
@@ -199,12 +266,40 @@ def decide_approval(root: Path, request_id: str, decision: str,
     raise KeyError(f"no pending approval {request_id!r}")
 
 
+def _has_task_end(receipts_path: str, task_id: str) -> bool:
+    """Phase-1 pid-reuse guard: the receipts say whether the task is
+    over, the pid table does not. Tolerant parse — a corrupt line is
+    skipped, because corruption elsewhere cannot hide an intact
+    task_end line, and a corrupt chain with a live pid keeps the old
+    behavior. Missing file reads False for the same reason: the
+    guard only adds a refusal when task_end is positively found."""
+    try:
+        lines = Path(receipts_path).read_text(encoding="utf-8").split("\n")
+    except OSError:
+        return False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("action") == "task_end" \
+                and row.get("task_id") == task_id:
+            return True
+    return False
+
+
 def kill_task(root: Path, task_id: str) -> dict:
     """Stop a running task and refund its in-flight reservations.
 
     SIGTERM first, SIGKILL after the grace window, then a kill receipt
     and a ledger refund. Refuses anything not currently running: a
-    second kill of the same task must not double-refund.
+    second kill of the same task must not double-refund. Refuses when
+    the receipts already show task_end: the pid in proc.json may have
+    been reused by an unrelated process since (phase 1; start-time
+    comparison is still a backlog row).
     """
     root = Path(root)
     # Windows has no SIGKILL; its SIGTERM already terminates
@@ -221,6 +316,11 @@ def kill_task(root: Path, task_id: str) -> dict:
     if task_status(target) != "running":
         raise KeyError(f"task {task_id!r} is not running"
                        f" ({task_status(target)})")
+    if _has_task_end(target.get("receipts", ""), task_id):
+        raise KeyError(
+            f"task {task_id!r} already ended (task_end is in its"
+            f" receipts); not killing pid {target['pid']}, which may"
+            " be reused")
     pid = target["pid"]
     os.kill(pid, signal.SIGTERM)
     deadline = time.time() + KILL_WAIT_SECONDS
@@ -493,8 +593,17 @@ class Handler(BaseHTTPRequestHandler):
         return bool(self.token) and hmac.compare_digest(
             form.get("token", ""), self.token)
 
+    def _beat(self):
+        # Every served response proves the monitor is up and
+        # reachable — including refusals. Never breaks serving.
+        try:
+            write_heartbeat(self.root)
+        except OSError:
+            pass
+
     def _send(self, data: bytes, code: int = 200,
               content_type: str = "text/html; charset=utf-8"):
+        self._beat()
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -502,6 +611,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _redirect(self, where: str):
+        self._beat()
         data = f'<a href="{where}">done</a>'.encode()
         self.send_response(303)
         self.send_header("Location", where)
@@ -586,6 +696,10 @@ def serve(root: Path, port: int) -> ThreadingHTTPServer:
     Handler.root = root
     Handler.token = secrets.token_hex(16)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        write_heartbeat(root)
+    except OSError:
+        pass
     return server
 
 
@@ -595,7 +709,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", required=True,
                         help="state root to watch (e.g. eval/tiers-smoke)")
     parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--check", action="store_true",
+                        help="check the heartbeat and exit"
+                             " (0 fresh, 1 silent)")
+    parser.add_argument("--interval", type=int,
+                        default=HEARTBEAT_INTERVAL_SECONDS,
+                        help="stale after this many seconds"
+                             f" (default {HEARTBEAT_INTERVAL_SECONDS})")
     args = parser.parse_args(argv)
+    if args.check:
+        if args.interval <= 0:
+            print("refusing to check: interval must be positive")
+            return 2
+        verdict = check_heartbeat(Path(args.root), args.interval)
+        if verdict["alive"]:
+            print(f"monitor alive: heartbeat {verdict['age_seconds']:.0f}s"
+                  f" ago (pid {verdict['pid']})")
+            return 0
+        print(f"monitor silent: {verdict['reason']} under {args.root}")
+        return 1
     server = serve(Path(args.root), args.port)
     print(f"monitor on http://127.0.0.1:{server.server_port}/"
           f" watching {args.root}", flush=True)

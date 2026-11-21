@@ -8,3 +8,4 @@ eval/brief-*
 eval/verify-*
 eval/planted-q*
 eval/livefetch/
+monitor-heartbeat.json

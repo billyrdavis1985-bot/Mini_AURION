@@ -7,7 +7,7 @@ milestone needs it (VISION.md rule 4).
 
 | Item | Source | Scheduled in |
 | --- | --- | --- |
-| Dead-man's switch does not exist (Monitor flags receipt-stale tasks as STALE; that is the hook, not the switch) | OPERATIONS section 4 `[kernel]` | M7 |
+| Dead-man's switch: heartbeat-on-serve + `--check` landed (M7 PR4); check-from-elsewhere for full coverage still open | M7 PR4 + OPERATIONS section 4 | operations future |
 | Receipt store: code-level WRITE confinement landed (STORE_PROTECTED denials, all runners pass their state dir); OS-level separation (broker UID/service) still open | M7 PR2 + OPERATIONS section 5 | broker future |
 | Memory module is never written by any agent in the loop | review 2026-11-12 | B3 |
 | Planner decomposition off; retest on multi-part tasks only | EXPERIMENTS F2 | B2/B3 |
@@ -18,7 +18,7 @@ milestone needs it (VISION.md rule 4).
 | Debug request dump (`MINI_AURION_DEBUG_BODY`) writes prompt contents with default file permissions | B1 review (#60) | when next touched |
 | EXPERIMENTS.md entries out of order (F7, F11, F10, F9, F8) | B1 review | when next touched |
 | Stronger G2: reader shows only files tracked at the frozen commit | PR #20 | when eval trees are reused |
-| `kill_task` signals the pid in `proc.json`; a dead pid reused by the OS would hit an unrelated process. Close by recording process start time and checking before signalling. | #72 backlog note | when next touched |
+| Pid reuse phase 1 landed (M7 PR4: `kill_task` refuses when receipts show `task_end`); phase 2 (record process start time, check before signalling) still open | #72 backlog note + M7 PR4 | when next touched |
 | `fetch_url` has a per-operation socket timeout but no total deadline: a slow-drip server can hold one fetch for minutes within the size cap. Add a wall-clock deadline per fetch. | B2 review (#79) | before B2 runs unattended |
 | `fetch_url` caps the **raw** body at 256 KB; github.com alone exceeded it in #79's live check. Most modern pages will. Cap the raw read higher (e.g. 2 MB) and cap the **extracted text** at what the context can carry. | #79 live evidence | before the B2 demo (or the demo measures how many fetches refuse) |
 | `FetchBackend(allow_private=True)` disables D5 entirely; it exists for loopback tests. The research runner should assert it is off, so no future flag or config path can enable it live. | B2 review (#79) | when next touched |
