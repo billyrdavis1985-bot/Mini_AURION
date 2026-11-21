@@ -172,7 +172,8 @@ def run_leg(question: str, brief: str, task_id: str, tree: Path,
                 [{"role": "brief", "text": question}])
             tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
                                 stage="experimental", task_id=task_id,
-                                agent_id=name, scope=contract)
+                                agent_id=name, scope=contract,
+                                state_dir=state_dir)
             specialists[name] = Specialist(
                 name, model, tools, model_estimate_nano=estimate,
                 investigator_prompt=SYSTEM_PROMPT)
