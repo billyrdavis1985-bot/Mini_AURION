@@ -88,6 +88,7 @@ class ConfinementTests(unittest.TestCase):
     def test_cwd_relative_spelling_denied(self):
         wrapper = self._wrapper()
         os.chdir(self.state)
+        self.addCleanup(os.chdir, self.tmp.name)
         rel = os.path.relpath(os.path.join(self.state, "r.jsonl"),
                               os.getcwd())
         with self.assertRaises(ToolDenied):
