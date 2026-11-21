@@ -24,8 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval.grade_code_qa import (EXACTNESS_NOTE, NANO_PER_USD,  # noqa: E402
-                                QUOTE_NOTE, TreeReader, grade,
-                                repo_state, tree_commit)
+                                QUOTE_NOTE, ResumeRefused, TreeReader,
+                                grade, repo_state, tree_commit)
 from mini_aurion.contract import contract_hash, load_contract  # noqa: E402
 from mini_aurion.contract import scope_denials  # noqa: E402
 from mini_aurion.critic import Critic  # noqa: E402
@@ -83,7 +83,9 @@ def _write_proc(state_dir: Path, task_id: str, ledger, routing_hash,
 def _wall_clock(receipts_path: Path) -> dict:
     """Wall-clock vs model-work time, both from receipts. Wall is
     task_end minus task_start; work sums model_call durations. Their
-    ratio is what the parallel leg is allowed to move."""
+    ratio is what the parallel leg is allowed to move. On a resumed
+    chain wall starts at the resume: the kill gap is operator time,
+    not task time."""
     start = end = None
     work_ms = 0
     for line in receipts_path.read_text(encoding="utf-8").splitlines():
@@ -91,6 +93,8 @@ def _wall_clock(receipts_path: Path) -> dict:
             continue
         rec = json.loads(line)
         if rec.get("action") == "task_start":
+            start = rec.get("ts")
+        elif rec.get("action") == "resume":
             start = rec.get("ts")
         elif rec.get("action") == "task_end":
             end = rec.get("ts")
@@ -229,6 +233,126 @@ def run_leg(question: str, brief: str, task_id: str, tree: Path,
         ledger.close()
 
 
+def resume_leg(state_dir: Path, tree: Path, contract, cases: dict,
+               router: Router, cap_nano: int) -> dict:
+    """Continue one interrupted demo leg in its own state dir. The
+    leg's workers come from its task id ({base}-serial/parallel, as
+    main builds them); anything else resumes serially, which is
+    always correct, just slower. Raises ResumeRefused before any
+    model call when there is nothing valid to resume."""
+    state_dir = Path(state_dir)
+    proc_path = state_dir / "proc.json"
+    try:
+        proc = json.loads(proc_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ResumeRefused(
+            f"cannot read {proc_path}: {exc}") from exc
+    task_id = proc.get("task_id", "")
+    if not task_id or not isinstance(task_id, str):
+        raise ResumeRefused(f"{proc_path} names no task")
+    if task_id.endswith("-parallel"):
+        tag, max_workers = "parallel", 2
+    elif task_id.endswith("-serial"):
+        tag, max_workers = "serial", 1
+    else:
+        tag, max_workers = "resumed", 1
+    ledger = Ledger(state_dir / "ledger.sqlite3",
+                    task_cap_nano=cap_nano, daily_cap_nano=cap_nano,
+                    global_cap_nano=cap_nano)
+    receipts = ReceiptStore(state_dir / "receipts.jsonl")
+    memory = Memory(state_dir / "memory.sqlite3", file_root=tree,
+                    receipt_store=receipts,
+                    mechanical_checks=frozenset({"critic"}))
+    try:
+        registry = ToolRegistry()
+        reader = TreeReader(tree)
+        registry.register(
+            "read_file", "READ", 0, reader,
+            description="Read a file from the repo tree. Cite path:line.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"]})
+        registry.register(
+            "list_dir", "READ", 0, reader,
+            description="List a directory in the repo tree. Start with"
+                        " path \".\" (the tree root, never \"/\"), then read"
+                        " the file most likely to hold the answer.",
+            parameters={"type": "object",
+                        "properties": {"path": {"type": "string"}}})
+        spec_a_model = router.model_for("specialist")
+        spec_b_model = router.model_for("specialist_b")
+        orc_model = router.model_for("orchestrator")
+        routing_hash = router.table_hash()
+        specialists = {}
+        for name, model in (("spec-a", spec_a_model),
+                            ("spec-b", spec_b_model)):
+            estimate = model.worst_case_nano(
+                [{"role": "brief", "text": QUESTION}])
+            tools = ToolWrapper(registry, receipts=receipts, ledger=ledger,
+                                stage="experimental", task_id=task_id,
+                                agent_id=name, scope=contract,
+                                state_dir=state_dir)
+            specialists[name] = Specialist(
+                name, model, tools, model_estimate_nano=estimate,
+                investigator_prompt=SYSTEM_PROMPT)
+        orc_estimate = orc_model.worst_case_nano(
+            [{"role": "brief", "text": QUESTION}])
+
+        def grade_both(candidate):
+            result = {"status": candidate["status"],
+                      "text": candidate["text"],
+                      "evidence": candidate["evidence"]}
+            for case_id in PART_CASES:
+                ok, _ = grade(cases[case_id], result, tree)
+                if not ok:
+                    return False
+            return True
+
+        orc = Orchestrator(
+            "orc", orc_model, specialists,
+            Critic("critic", memory, receipts=receipts),
+            receipts=receipts, ledger=ledger,
+            model_estimate_nano=orc_estimate, contract=contract,
+            message_budget=contract.messages,
+            planner_prompt=PLANNER_PROMPT,
+            judge_prompt=RELEVANCE_PROMPT,
+            routing_hash=routing_hash, max_workers=max_workers,
+            acceptance=(("A1", grade_both),
+                        ("A2", lambda cand: scope_denials(receipts) == 0)))
+        seats = {"specialist": _seat_of(spec_a_model),
+                 "specialist_b": _seat_of(spec_b_model),
+                 "orchestrator": _seat_of(orc_model)}
+        _write_proc(state_dir, task_id, ledger, routing_hash,
+                    status="running", seats=seats)
+        result = orc.resume_task(task_id)
+        if result.get("status") == "refused":
+            proc_path.write_text(json.dumps(proc, indent=1),
+                                 encoding="utf-8")
+            raise ResumeRefused(result["reason"])
+        _write_proc(state_dir, task_id, ledger, routing_hash,
+                    status="ended", end_status=result["status"], seats=seats)
+        clock = _wall_clock(state_dir / "receipts.jsonl")
+        notes = [e for e in memory.recall(include_unverified=True)
+                 if e.get("task_id") == task_id]
+        return {
+            "tag": tag, "task_id": task_id, "status": result["status"],
+            "text": result["text"], "evidence": result["evidence"],
+            "spent_nano": ledger.spend(task_id)["settled_nano"],
+            "wall_ms": clock["wall_ms"], "work_ms": clock["work_ms"],
+            "findings": [(f["subtask"], f["status"])
+                         for f in result["findings"]],
+            "notes_filed": len(notes),
+            "notes_verified": sum(1 for n in notes
+                                  if n["status"] == "verified"),
+            "receipts": str(state_dir / "receipts.jsonl"),
+            "resumed": True, "replayed": result.get("replayed", []),
+            "re_delegated": result.get("re_delegated", []),
+        }
+    finally:
+        memory.close()
+        ledger.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
@@ -238,8 +362,12 @@ def main(argv=None) -> int:
     parser.add_argument("--cap-usd", default="3.00")
     parser.add_argument("--task-id", default="b3demo")
     parser.add_argument("--legs", choices=("serial", "parallel", "both"),
-                        default="both")
+                        default=None)
+    parser.add_argument("--resume-from", default=None)
     args = parser.parse_args(argv)
+    if args.resume_from and args.legs:
+        return _refuse("--resume-from resumes one recorded leg,"
+                       " not --legs")
     if not args.live:
         return _refuse("live model calls need --live")
     tree = Path(args.tree)
@@ -288,8 +416,31 @@ def main(argv=None) -> int:
     print(f"runner: {head}")
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.resume_from:
+        try:
+            leg = resume_leg(Path(args.resume_from), tree, contract,
+                             cases, router, cap_nano)
+        except ResumeRefused as exc:
+            return _refuse(f"nothing to resume: {exc}")
+        report = {
+            "resumed": True,
+            "question": QUESTION,
+            "contract": contract_hash(contract),
+            "routing": router.table_hash(),
+            "runner_commit": head,
+            "cap_usd": args.cap_usd,
+            "leg": leg,
+        }
+        out_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
+        spent = leg["spent_nano"] / NANO_PER_USD
+        print(f"resumed {leg['task_id']}: status={leg['status']} "
+              f"spent=${spent:.4f} wall_ms={leg['wall_ms']} "
+              f"work_ms={leg['work_ms']} replayed={leg['replayed']} "
+              f"re-delegated={leg['re_delegated']}")
+        print(f"wrote {out_path}")
+        return 0
     legs = {}
-    for tag, workers in legs_for(args.legs):
+    for tag, workers in legs_for(args.legs or "both"):
         task_id = f"{args.task_id}-{tag}"
         state_dir = out_path.parent / task_id
         leg = run_leg(QUESTION, brief, task_id, tree, state_dir,
