@@ -83,14 +83,21 @@ One chain showing `task_start` → `kill` → `resume` →
 paged dead-man's check, and a denied store write. Either the resume
 reaches the same brief or the transcript says why it could not.
 
-## Open questions (operator + reviewer)
+## Open questions (operator + reviewer) — answered
 
 - Resume under the same task id (proposed) or a linked new id?
+  **Same id** (PR #104).
 - Message budget on resume: continued from the checkpoint
-  (proposed) or fresh?
+  (proposed) or fresh? **Continued** (PR #104).
 - Dead-man's interval default, and where the check runs?
+  **60 s; the operator schedules it or runs it before live
+  work** (PR #105). Full coverage wants the check elsewhere —
+  documented limit.
 - Pid phase 2 now, or does refuse-when-ended suffice?
+  **Refuse-when-ended suffices** (PR #105); start-time
+  comparison stays a backlog row.
 - Does the row stay Partial (proposed), or does M7 earn more?
+  **Stays Partial** — see `docs/demos/M7.md` verdict.
 
 ## Constraints
 

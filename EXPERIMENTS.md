@@ -301,3 +301,34 @@ kept (OPERATIONS section 7).
   same code path as the eval loop's, not retyped beside it (#98);
   and single-leg reruns (#99) beat rerunning both legs when
   variance strikes one.
+
+## F15. The autonomy loop closes only where a human watches
+
+- **Setup:** M7's demo (`docs/demos/M7.md`): one serial
+  B3 leg killed mid-run from the Monitor page, resumed
+  on the same chain to a partial brief, plus a silenced
+  and a live dead-man's check. Runner `6907cd4`, all
+  seats meta/muse-spark-1.1.
+- **Result:** the chain holds exactly one `kill`, one
+  `resume`, one `task_end`. The kill refunded 1
+  in-flight reservation ($0.0175); the resume
+  re-delegated all 3 subtasks (nothing replayable —
+  the kill landed before any post-plan
+  checkpoint) and briefed partial from verified
+  notes only, matching the clean baseline's shape.
+  Silence paged (exit 1, 11330 s), beats passed
+  (exit 0, 1 s).
+- **Cost:** $0.0958 clean + $0.1798 kill-and-resume.
+- **Variance, all caught by the loop:** two kill
+  probes on finished legs refused (already ended);
+  a fossil monitor squatting on port 8787 ate the
+  beats until killed; STALE never tripped live
+  (kill-to-resume took minutes, not 5 silent
+  minutes) and is pinned by unit test instead.
+- **Lesson:** the checkpoint boundary decides what
+  resume can save — a kill before the first
+  checkpoint is a full re-spend, honestly
+  receipted. And the dead-man's check is only as
+  live as its newest beat: the demo's first
+  three "silent" readings were a stale port
+  squatter, not a dead monitor.
