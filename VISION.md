@@ -36,7 +36,7 @@ and probabilities, which is why the later milestones exist.
 | Premium tiers decide and verify | A verifier on a different model/provider than the investigator; flags, never clears | **Built** | `docs/demos/B1.md` |
 | Research system | Open questions answered from real outside sources, not only the repo's own code | **Built** | `docs/demos/B2.md` |
 | Multi-agent | Agents that build on each other's **verified** findings through shared memory, not one model wearing several hats | **Built** | `docs/demos/B3.md` |
-| Autonomous workflow | A task runs several steps without the operator between them, inside stage bounds | Partial (single task, read-only) | B3 demo + M7 |
+| Autonomous workflow | A task runs several steps without the operator between them, inside stage bounds | Partial (single task, read-only) | B3 demo + `docs/demos/M7.md` |
 | Operator control | Kill switch, caps and approvals with a surface the operator can use | **Built** | `docs/demos/monitor.md` |
 
 A row moves only by a PR that says, in its capability line, which row it
@@ -54,7 +54,7 @@ capability (OPERATIONS section 2).
 | **Monitor** | Local, read-only web app over the state directory; kill switch, caps, approvals as the only writes. | Operator watches a live task, reads its receipts, and kills it from the app. Spec: `docs/tasks/monitor.md`. |
 | **B2 Research** | `fetch_url` read tool (memory already tracks fetched URLs), a research task class, ADR-003 on verifying predictive claims (provenance now, calibration over time). | A cited brief on one real question, built from pages actually fetched, with every claim's provenance receipted. The brief also carries one planted unsupported claim (a real quote that does not support it); the demo runs it past a same-provider and a cross-provider verifier and records whether each flagged it (ADR-003). Either result is recorded as a finding; it is not a pass/fail gate. |
 | **B3 Collaboration** | Specialists in parallel; verified notes written to shared memory; a synthesizer that builds only on verified notes. | Several agents on one question, visibly building on each other's verified findings; wall-clock shows the parallel gain. |
-| **M7 Autonomy prerequisites** | Saved state and resume, process-level kill, dead-man's switch, receipt store agents cannot write. | Required before any WRITE or EXTERNAL capability. Partly delivered by the monitor. |
+| **M7 Autonomy prerequisites** | Saved state and resume, process-level kill, dead-man's switch, receipt store agents cannot write. | Required before any WRITE or EXTERNAL capability. Partly delivered by the monitor. Demo: `docs/demos/M7.md`. |
 
 ## Rules that keep the build on the vision
 

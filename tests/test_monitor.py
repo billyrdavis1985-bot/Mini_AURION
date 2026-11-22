@@ -16,7 +16,8 @@ from mini_aurion.monitor import (_pid_alive, check_heartbeat,  # noqa: E402
                                  decide_approval, find_tasks,
                                  heartbeat_path, kill_task,
                                  pending_approvals, receipt_age_seconds,
-                                 serve, task_status, write_heartbeat)
+                                 render_live, serve, task_status,
+                                 write_heartbeat)
 from mini_aurion.monitor import main as monitor_main  # noqa: E402
 from mini_aurion.receipts import ReceiptStore  # noqa: E402
 
@@ -298,6 +299,26 @@ class MonitorTests(unittest.TestCase):
         age = receipt_age_seconds({"ts": stamp})
         self.assertGreater(age, 590)
         self.assertLess(age, 610)
+
+    def test_live_page_flags_a_silent_live_task_as_stale(self):
+        # The M7 demo could not trip STALE live (kill to resume took
+        # minutes, not 300 s), so the flag is pinned here: live pid,
+        # last receipt years old.
+        row = {"task_id": "task-a", "action": "task_start",
+               "outcome": "ok", "ts": "2020-01-01T00:00:00Z"}
+        with open(self.receipts, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+        # The fixture's index still holds the fresh row; drop the
+        # anchor so the monitor reads the JSONL tail instead.
+        anchor = self.receipts + ".anchor"
+        if os.path.exists(anchor):
+            os.unlink(anchor)
+        html = render_live(self.root, "tok").decode()
+        self.assertIn('<span class="stale">STALE</span>', html)
+
+    def test_live_page_leaves_a_fresh_task_unflagged(self):
+        html = render_live(self.root, "tok").decode()
+        self.assertIn("<td>running</td>", html)
 
     def test_dead_pid_shows_died_not_running(self):
         self.proc["pid"] = 2**30 + 7  # no such process
