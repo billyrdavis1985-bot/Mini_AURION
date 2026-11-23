@@ -8,7 +8,7 @@ from mini_aurion.fixture import FakeModel, FakeTools
 from mini_aurion.ledger import Ledger
 from mini_aurion.memory import Memory
 from mini_aurion.messages import AgentMessage
-from mini_aurion.orchestrator import Orchestrator
+from mini_aurion.orchestrator import Orchestrator, SYNTH_SYSTEM_PROMPT
 from mini_aurion.receipts import ReceiptStore
 from mini_aurion.specialist import Specialist
 from mini_aurion.tools import ToolRegistry, ToolWrapper
@@ -165,7 +165,10 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual([f["subtask"] for f in result["findings"]],
                          ["s1"])
         self.assertEqual(self.last_orc_model.calls, 1)
-        self.assertEqual(self.last_orc_model.systems, [None])
+        # The single call is the synthesis, which carries the
+        # shaped system prompt (synth-json milestone).
+        self.assertEqual(self.last_orc_model.systems,
+                         [SYNTH_SYSTEM_PROMPT])
 
     def test_no_decompose_still_enforces_acceptance(self):
         orc = self.build({"text": "ignored plan"},
@@ -368,6 +371,63 @@ class OrchestratorTests(unittest.TestCase):
         self.assertTrue(result["text"].startswith("PARTIAL:"))
         self.assertIn("good", result["text"])
         self.assertNotIn("extra claims", result["text"])
+
+    def test_synthesis_call_carries_the_shaped_system_prompt(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]})
+        orc.run("t1", "question?")
+        self.assertEqual(self.last_orc_model.systems[-1],
+                         SYNTH_SYSTEM_PROMPT)
+        self.assertIn('"evidence"', SYNTH_SYSTEM_PROMPT)
+        self.assertIn("[mem_...]", SYNTH_SYSTEM_PROMPT)
+
+    def test_shaped_synthesis_with_in_set_evidence_is_accepted(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]},
+            synth_text="A, briefly")
+        result = orc.run("t1", "q?")
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["text"], "A, briefly")
+        self.assertFalse(result["text"].startswith("PARTIAL:"))
+
+    def test_synthesis_citing_outside_notes_falls_back(self):
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]},
+            synth_text="A [mem_ffffffffffffffff]")
+        result = orc.run("t1", "q?")
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["text"].startswith("PARTIAL:"))
+        self.assertNotIn("ffffffffffffffff", result["text"])
+        notes = [r["detail"].get("note", "")
+                 for r in self.receipts.read_all()
+                 if r["action"] == "task_end"]
+        self.assertTrue(any("outside this task's verified set" in n
+                            for n in notes))
+
+    def test_synthesis_citing_fresh_evidence_falls_back(self):
+        with open(os.path.join(self.root, "b.txt"), "w") as fh:
+            fh.write("second file content here")
+        fresh = [{"kind": "file", "ref": "b.txt:1",
+                  "quote": "second file content"}]
+        orc = self.build(
+            plan({"id": "s1", "brief": "b1", "specialist": "alpha"}),
+            {"alpha": [answer("A")]},
+            synth_text="A and B",
+            synth_evidence=GOOD_EVIDENCE + fresh)
+        begun = self.receipts.begin(
+            agent_id="spec", task_id="t1", action="tool_call",
+            tool="read_file", detail={"args": {"path": "b.txt"}})
+        self.receipts.settle(begun["seq"], 0)
+        result = orc.run("t1", "q?")
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["text"].startswith("PARTIAL:"))
+        notes = [r["detail"].get("note", "")
+                 for r in self.receipts.read_all()
+                 if r["action"] == "task_end"]
+        self.assertTrue(any("no finding cited" in n for n in notes))
 
 
     def test_plan_receipt_carries_a_verdict(self):
